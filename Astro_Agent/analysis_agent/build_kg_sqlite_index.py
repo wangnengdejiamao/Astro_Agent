@@ -17,13 +17,13 @@ from typing import Any
 REPO_ROOT = Path(__file__).resolve().parents[2]
 DEFAULT_KG_JSON = (
     REPO_ROOT
-    / "prompt2graph_for_astronomy"
+    / "graph_for_astronomy"
     / "output"
     / "white_dwarf_kg"
     / "production_full"
     / "multi_stage_deduplicated.json"
 )
-DEFAULT_DB = REPO_ROOT / "prompt2graph_for_astronomy" / "output" / "white_dwarf_kg" / "kg_index.sqlite"
+DEFAULT_DB = REPO_ROOT / "graph_for_astronomy" / "output" / "white_dwarf_kg" / "kg_index.sqlite"
 
 
 def node_name(node: dict[str, Any] | None) -> str:

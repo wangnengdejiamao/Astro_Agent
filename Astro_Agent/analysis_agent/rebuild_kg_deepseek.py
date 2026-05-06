@@ -18,7 +18,7 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-P2G_ROOT = REPO_ROOT / "prompt2graph_for_astronomy"
+P2G_ROOT = REPO_ROOT / "graph_for_astronomy"
 RAG_DB = REPO_ROOT / "rag_pipeline" / "index" / "white_dwarf_rag.sqlite"
 CORPUS_DIR = P2G_ROOT / "input" / "white_dwarf_kg_deepseek"
 CORPUS_PATH = CORPUS_DIR / "corpus_cleaned.json"

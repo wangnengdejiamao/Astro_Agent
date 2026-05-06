@@ -22,7 +22,7 @@ ASTRO_TOOLBOX_DIR = ASTRO_AGENT_DIR / "astro_toolbox"
 RAG_DB = REPO_ROOT / "rag_pipeline" / "index" / "white_dwarf_rag.sqlite"
 KG_JSON = (
     REPO_ROOT
-    / "prompt2graph_for_astronomy"
+    / "graph_for_astronomy"
     / "output"
     / "white_dwarf_kg"
     / "production_full"
@@ -30,7 +30,7 @@ KG_JSON = (
 )
 KG_INDEX = (
     REPO_ROOT
-    / "prompt2graph_for_astronomy"
+    / "graph_for_astronomy"
     / "output"
     / "white_dwarf_kg"
     / "kg_index.sqlite"

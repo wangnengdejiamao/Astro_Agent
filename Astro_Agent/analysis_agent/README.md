@@ -106,7 +106,7 @@ The agent also auto-loads private `.env` files from:
 ```text
 ./.env
 Astro_Agent/analysis_agent/.env
-prompt2graph_for_astronomy/.env
+graph_for_astronomy/.env
 ```
 
 DeepSeek-compatible provider variables:

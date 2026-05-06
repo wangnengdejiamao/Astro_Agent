@@ -50,10 +50,10 @@ literature/**/*.pdf
 # RAG indexes and generated graph outputs
 rag_pipeline/index/
 rag_pipeline/cache/
-prompt2graph_for_astronomy/output/
-prompt2graph_for_astronomy/cache/
-prompt2graph_for_astronomy/**/*.sqlite
-prompt2graph_for_astronomy/**/*.jsonl
+graph_for_astronomy/output/
+graph_for_astronomy/cache/
+graph_for_astronomy/**/*.sqlite
+graph_for_astronomy/**/*.jsonl
 
 # Astro Agent generated data
 Astro_Agent/output/

@@ -3,7 +3,7 @@
 .env.local
 *.env.*.local
 analysis_agent/.env
-prompt2graph_for_astronomy/.env
+graph_for_astronomy/.env
 
 # Python
 __pycache__/

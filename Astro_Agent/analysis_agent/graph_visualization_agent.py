@@ -33,8 +33,8 @@ from .llm_client import LLMClient, load_default_env, load_model_config
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_KG_DB = REPO_ROOT / "prompt2graph_for_astronomy" / "output" / "white_dwarf_kg" / "kg_index.sqlite"
-DEFAULT_SUMMARY = REPO_ROOT / "prompt2graph_for_astronomy" / "output" / "white_dwarf_kg" / "production_full" / "summary.json"
+DEFAULT_KG_DB = REPO_ROOT / "graph_for_astronomy" / "output" / "white_dwarf_kg" / "kg_index.sqlite"
+DEFAULT_SUMMARY = REPO_ROOT / "graph_for_astronomy" / "output" / "white_dwarf_kg" / "production_full" / "summary.json"
 DEFAULT_OUT = REPO_ROOT / "Astro_Agent" / "output" / "analysis_agent" / "kg_graph_report"
 
 

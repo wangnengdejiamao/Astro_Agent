@@ -54,7 +54,7 @@ def load_default_env() -> list[str]:
     return load_dotenv_files(
         REPO_ROOT / ".env",
         PACKAGE_DIR / ".env",
-        REPO_ROOT / "prompt2graph_for_astronomy" / ".env",
+        REPO_ROOT / "graph_for_astronomy" / ".env",
     )
 
 
