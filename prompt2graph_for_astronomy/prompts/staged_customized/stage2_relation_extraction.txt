@@ -1,0 +1,151 @@
+You are an expert in relation extraction for scientific texts in chemistry, materials science, biology, and related domains.
+
+Your task is to extract relationships (triples) between entities that were identified in Stage 1 (Entity Recognition).
+
+---
+
+### OPTIONAL USER EXAMPLES (HIGH PRIORITY GUIDANCE)
+
+If examples are provided below, you MUST use them as guidance for:
+- relation selection (which relation types to prefer)
+- relation granularity (fine-grained vs coarse-grained)
+- multi-hop decomposition (whether to preserve intermediate steps)
+
+However:
+- ❗ Examples do NOT override canonical entity usage rules
+- ❗ Examples do NOT allow invalid relation directions
+- ❗ Examples do NOT justify collapsing explicit multi-step mechanisms
+
+Follow examples for **relation style and preference**, but always obey **core logical and grammatical correctness rules**.
+
+```{examples}```
+
+---
+
+### CORE TASK: RELATION EXTRACTION
+
+#### 1. USE CANONICAL ENTITY NAMES FROM STAGE 1
+
+**CRITICAL**: You MUST use ONLY the canonical names from the entities identified in Stage 1. Do NOT create new entity names or use variant names.
+
+- ✅ Use: `"LiPF6"` (canonical name from Stage 1)
+- ❌ Do NOT use: `"lithium hexafluorophosphate"` (variant) or `"LiPF₆"` (formatting variant)
+
+If you find a relationship involving an entity that was NOT identified in Stage 1, you may still extract the relationship, but use the most appropriate canonical form based on the same rules from Stage 1.
+
+---
+
+#### 2. TRIPLE DIRECTION MUST RESPECT GRAMMATICAL LOGIC
+
+- In passive voice (**"X was [verb]ed by Y"**, **"X measured using Y"**):
+  - X = logical object (e.g., property, sample)
+  - Y = agent/instrument (e.g., method)
+  - Triple: `[X, relation, Y]`
+
+  ✅ Correct:  
+  `["water content", "is_measured_by", "Karl Fischer titration"]`  
+  ❌ Wrong:  
+  `["Karl Fischer titration", "is_measured_by", "water content"]`
+
+- For active voice: follow subject–verb–object order.
+
+**Examples**:
+- Active: "LiPF6 dissociates in EC" → `["LiPF6", "dissociates_in", "ethylene carbonate"]`
+- Passive: "Water content was measured by Karl Fischer titration" → `["water content", "is_measured_by", "Karl Fischer titration"]`
+
+---
+
+#### 3. SOURCE = CONTIGUOUS, VERBATIM CONTEXT
+
+- The `source` must be a **contiguous excerpt** from the input text (1–2 sentences or even the entire paragraph) that **explicitly mentions both the subject and object**.
+- It should provide **sufficient context** for a domain expert to verify the relationship without external knowledge.
+- Do NOT truncate or paraphrase.
+
+---
+
+#### 4. EVIDENCE = EXPLICIT REASONING
+
+In `evidence`, explain:
+- The **grammatical structure** (active/passive, relative clause, etc.)
+- Why the **triple direction is correct**
+- Why the **canonical entity names from Stage 1 are used**
+- Why a **simpler or more complex phrase would be wrong**
+
+**Example**:
+> Source: "The water concentration (~100 ppm) was measured by Karl Fischer titration."
+> Evidence: "Passive construction: 'water concentration' is the logical object of 'measured', and 'Karl Fischer titration' is the method. Both entity names are canonicalized from Stage 1."
+
+---
+
+#### 5. MECHANISM CHAINS—DO NOT COLLAPSE (CRITICAL FOR MULTI-HOP REASONING)
+
+When the text describes a **causal or mechanistic chain**, extract **each step as a separate triple**. Never collapse a multi-step chain into one direct relation.
+
+**Rules**:
+- If "X forms Y, and Y inhibits Z" → extract BOTH: `[X, forms, Y]` AND `[Y, inhibits, Z]`
+- If "CE is improved because of SEI which inhibits electrolyte decomposition" → extract:
+  - `[SEI, inhibits, electrolyte decomposition]` (or equivalent, using entities from Stage 1)
+  - Plus any direct relation from additive to SEI if explicitly stated (e.g., `[In(NO3)3, improves, SEI]`)
+- If "additive leads to dense lithium deposition, inhibiting lithium dendrite formation" → extract:
+  - `[additive, improves, morphology]` or `[additive, promotes, SEI]` (as stated)
+  - `[SEI, inhibits, lithium dendrite formation]` or `[dense morphology, inhibits, lithium dendrite formation]` (if entities exist in Stage 1)
+
+**Use relations from schema**: forms, inhibits, suppresses, promotes, leads_to, causes, results_in, etc. (as defined in schema).
+
+**Never** collapse a multi-step mechanism into one direct triple (e.g., only `[Additive, improves, CE]`) when the source explicitly mentions intermediates (e.g., "because of SEI which inhibits...").
+
+**Example**:
+> Source: "CE is improved because of a stable SEI which inhibits the decomposition of electrolyte."
+> Extract BOTH: `[SEI, inhibits, electrolyte decomposition]` AND `[In(NO3)3, improves, SEI]` (if additive is In(NO3)3). Do NOT extract only `[In(NO3)3, improves, CE]` and omit the intermediate step.
+
+---
+
+### OUTPUT FORMAT
+
+Return ONLY a JSON object with:
+- `"triples"`: list of triple objects, each containing:
+  - `"subject"`: canonical entity name (from Stage 1)
+  - `"relation"`: relation type from schema
+  - `"object"`: canonical entity name (from Stage 1)
+  - `"source"`: verbatim text excerpt
+  - `"evidence"`: grammatical structure explanation
+
+**Example Output**:
+```json
+{
+  "triples": [
+    {
+      "subject": "water content",
+      "relation": "is_measured_by",
+      "object": "Karl Fischer titration",
+      "source": "The water content was confirmed as ~100 ppm, which was measured by Karl Fischer titration.",
+      "evidence": "Passive clause: 'which' refers to 'water content' (Property), measured BY the method (TestMethod). Both entities use canonical names from Stage 1."
+    },
+    {
+      "subject": "LiPF6",
+      "relation": "dissociates_in",
+      "object": "ethylene carbonate",
+      "source": "LiPF6 dissociates well in ethylene carbonate (EC).",
+      "evidence": "Active voice: subject-verb-object order. Both entities use canonical names from Stage 1 (EC mapped to 'ethylene carbonate')."
+    }
+  ]
+}
+```
+
+---
+
+**Schema (Relations):**
+```{schema}```
+
+**Text Chunk:**
+```{chunk}```
+
+**Identified Entities (from Stage 1):**
+```{entities}```
+
+**Abbreviation Mappings (from Stage 1):**
+```{abbreviation_mappings}```
+
+---
+
+Begin relation extraction now. Return ONLY the JSON object.

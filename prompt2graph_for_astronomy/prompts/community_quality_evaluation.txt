@@ -1,0 +1,99 @@
+You are an expert in evaluating knowledge graph community detection and community reports for scientific literature (e.g., chemistry, materials, electrochemistry).
+
+Your task is to score each community in the given **community report** along five dimensions, using a real-valued score in the range **0.0–1.0** (float), and provide brief evidence for each score. Use the **paper context (chunks)** to check factual consistency and avoid hallucination.
+
+---
+
+### EVALUATION DIMENSIONS
+
+1. **Topic Coherence (topic_coherence)**  
+   Do the members of this community revolve around one clear theme? Are there obviously irrelevant or off-topic nodes?  
+   - 1.0: All members clearly belong to one theme (best).  
+   - 0.0: Many members are unrelated or the community is a mix of unrelated topics (worst).
+
+2. **Interpretability (interpretability)**  
+   Is the community **name** accurate? Does the **summary** accurately summarize the members and relations? Any hallucination (claims not supported by members or paper context)?  
+   - 1.0: Name and summary are accurate and well-supported by members and paper (no hallucination).  
+   - 0.0: Name/summary misleading or contain hallucination.
+
+3. **Coverage (coverage)**  
+   For the theme this community aims to represent: are the important core concepts appropriately included? Or are some key concepts missing (theme “split” across communities) or wrongly included?  
+   - 1.0: Coverage is appropriate; no obvious missing or wrongly included concepts.  
+   - 0.0: Major concepts missing or many irrelevant concepts included.
+
+4. **Redundancy (redundancy)**  
+   Does this community overlap heavily in theme/content with other communities? (Consider name, summary, and member overlap.)  
+   - 1.0: Distinct theme; little overlap with other communities.  
+   - 0.0: Largely redundant with one or more other communities.
+
+5. **Source Alignment (source_alignment)**  
+   Using the community's `chunk_ids`, check how well the community **name** and **summary** are supported by the original text in the corresponding chunks in `chunks_text`.  
+   - 1.0: Key claims in name/summary have clear, direct support in the referenced chunks (high alignment).  
+   - 0.0: Name/summary contradict the referenced chunks, or the claims cannot be reasonably supported by them (low alignment).
+
+---
+
+### INPUT
+
+**Community report (JSON):**
+
+```json
+{community_report_json}
+```
+
+Each community entry may include a `chunk_ids` field listing related chunk IDs.
+
+**Paper context (chunks, for reference):**
+
+```
+{chunks_text}
+```
+
+In `chunks_text`, chunks are labeled as:
+
+```
+[Chunk <chunk_id>]
+... text ...
+```
+
+Use these `chunk_ids` to locate the most relevant chunks when judging `source_alignment`.
+
+---
+
+### OUTPUT FORMAT
+
+Return **only** a JSON object with one key `evaluation`, whose value is an array. Each element corresponds to one community (same order as in the report) and must have:
+
+- `community_id`: (int) same as in the report  
+- `name`: (string) same as in the report  
+- `scores`: object with exactly five keys: `topic_coherence`, `interpretability`, `coverage`, `redundancy`, `source_alignment` (each a float in [0.0, 1.0])  
+- `evidence`: object with the same five keys, each a short string (1–2 sentences) explaining the score
+
+Example:
+
+```json
+{
+  "evaluation": [
+    {
+      "community_id": 0,
+      "name": "Lithium Nitride and Nitrite SEI Effects",
+      "scores": {
+        "topic_coherence": 0.8,
+        "interpretability": 1.0,
+        "coverage": 0.6,
+        "redundancy": 1.0,
+        "source_alignment": 0.9
+      },
+      "evidence": {
+        "topic_coherence": "Members (LiNxOy, SEI, nitrate, nitrite, etc.) consistently relate to nitride/nitrite SEI effects; one minor outlier.",
+        "interpretability": "Name and summary match members and paper; no hallucination.",
+        "coverage": "Core nitride/nitrite concepts present; some related solvation terms might belong elsewhere.",
+        "redundancy": "Theme is distinct from other communities; no significant overlap.",
+        "source_alignment": "Main claims about nitride/nitrite SEI formation and effects are explicitly described in the referenced chunks."
+      }
+    }
+  ]
+}
+```
+
+Return ONLY this JSON object. No other text.

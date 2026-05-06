@@ -1,0 +1,363 @@
+You are an expert in relation extraction for scientific texts in electrochemistry, energy storage, materials science, and specifically lithium–sulfur (Li–S) battery systems.
+
+Your task is to extract relationships (triples) between entities that were identified in Stage 1 (Entity Recognition).
+---
+
+### CORE TASK: RELATION EXTRACTION
+
+#### 1. USE CANONICAL ENTITY NAMES FROM STAGE 1
+
+**CRITICAL**: You MUST use ONLY the canonical names from the entities identified in Stage 1. Do NOT create new entity names or use variant names.
+
+- ✅ Use: `"LiTFSI"` (canonical name from Stage 1)
+- ❌ Do NOT use: `"lithium bis(trifluoromethanesulfonyl)imide"` (variant) or `"LiN(SO2CF3)2"` (formatting variant)
+
+- ✅ Use: `"DOL"`
+- ❌ Do NOT use: `"1,3-dioxolane"` (if not canonicalized)
+
+- ✅ Use: `"CoNiCuMnMg@C"` (canonical name from Stage 1)
+- ❌ Do NOT use: `"CoNiCuMnMg@C catalyst"` (includes type) or "the high-entropy alloy" (descriptive variant)
+
+If you find a relationship involving an entity that was NOT identified in Stage 1, you may still extract the relationship, but use the most appropriate canonical form based on the same rules from Stage 1.
+
+---
+
+#### **⚠️ RELATION PRIORITY RULE (CRITICAL — NEW)**
+
+When multiple relations are possible:
+
+Priority order:
+
+1. mechanism relations (adsorption, conversion, SEI)
+2. material → mechanism
+3. mechanism → property
+4. system-level fallback
+
+DO NOT:
+- skip mechanism relations
+- directly connect material → performance if intermediate exists
+
+---
+
+#### 2. TRIPLE DIRECTION MUST RESPECT GRAMMATICAL LOGIC
+
+- In passive voice (**"X was [verb]ed by Y"**, **"X measured using Y"**):
+  - X = logical object (e.g., property, sample)
+  - Y = agent/instrument/material/method
+  - Triple: `[X, relation, Y]`
+
+  ✅ Correct:  
+  `["polysulfide concentration", "is_measured_by", "UV-vis spectroscopy"]`  
+  ❌ Wrong:  
+  `["UV-vis spectroscopy", "is_measured_by", "polysulfide concentration"]`
+
+- For active voice: follow subject–verb–object order.
+
+**Examples**:
+- Active: "Li2S nucleates on carbon surface" → `["Li2S", "nucleates_on", "carbon"]`
+- Passive: "Polysulfides were adsorbed by CNT" → `["polysulfides", "are_adsorbed_by", "CNT"]`
+- Active: "CoNiCuMnMg@C catalyst boosts Li ion diffusion" → `["CoNiCuMnMg@C", "boosts", "Li ion diffusion"]`
+
+---
+
+#### 3. SOURCE = CONTIGUOUS, VERBATIM CONTEXT
+
+- The `source` must be a **contiguous excerpt** from the input text (1–2 sentences or even the entire paragraph) that **explicitly mentions both the subject and object**.
+- It should provide **sufficient context** for a domain expert to verify the relationship without external knowledge.
+- Do NOT truncate or paraphrase.
+
+---
+
+#### 4. EVIDENCE = EXPLICIT REASONING
+
+In `evidence`, explain:
+- The **grammatical structure** (active/passive, relative clause, etc.)
+- Why the **triple direction is correct**
+- Why the **canonical entity names from Stage 1 are used**
+- Why a **simpler or more complex phrase would be wrong**
+
+**Example**:
+> Source: "The water concentration (~100 ppm) was measured by Karl Fischer titration."
+> Evidence: "Passive construction: 'water concentration' is the logical object of 'measured', and 'Karl Fischer titration' is the method. Both entity names are canonicalized from Stage 1."
+> Source: "The soluble polysulfides were effectively trapped by the polar TiO2 surface."
+> Evidence: "Passive structure: 'polysulfides' is the logical object being trapped, and 'TiO2' is the agent. The relation follows object–verb–agent logic. Both entities use canonical names from Stage 1."
+> Source: "Theoretical calculation optimization results confirm that polysulfides stabilize at the Carbon interface rather than directly at the alloy surface so as to avoid its being poisoned."
+> Evidence: "Active voice: 'polysulfides' is the subject of 'stabilize', and 'Carbon interface' is the location. The canonical entity 'polysulfides' is used as identified in Stage 1, and 'carbon interface' is used over 'Carbon interface' for consistency with material naming conventions."
+
+---
+
+#### 5. MECHANISM CHAINS—DO NOT COLLAPSE (CRITICAL FOR MULTI-HOP REASONING)
+
+When the text describes a **causal or mechanistic chain**, extract **each step as a separate triple**. Never collapse a multi-step chain into one direct relation.
+
+⚠️ This is EXTREMELY IMPORTANT for lithium–sulfur batteries.
+
+Li–S systems inherently involve:
+- polysulfide conversion chains
+- interfacial reactions
+- multi-step electrochemical processes
+
+You MUST extract EACH step separately.
+
+**Rules**:
+- If "X forms Y, and Y inhibits Z" → extract BOTH: `[X, forms, Y]` AND `[Y, inhibits, Z]`
+- If "CE is improved because of SEI which inhibits electrolyte decomposition" → extract:
+  - `[SEI, inhibits, electrolyte decomposition]` (or equivalent, using entities from Stage 1)
+  - Plus any direct relation from additive to SEI if explicitly stated (e.g., `[In(NO3)3, improves, SEI]`)
+- If "additive leads to dense lithium deposition, inhibiting lithium dendrite formation" → extract:
+  - `[additive, improves, morphology]` or `[additive, promotes, SEI]` (as stated)
+  - `[SEI, inhibits, lithium dendrite formation]` or `[dense morphology, inhibits, lithium dendrite formation]` (if entities exist in Stage 1)
+- If "the catalyst enhances electron density, which in turn enhances adsorption of Li" → extract:
+  -`[CoNiCuMnMg@C, enhances, electron density]`
+  -`[electron-rich carbon, enhances, Li adsorption]`
+- If "vacancies optimize the electronic structure to promote rapid charge transfer, enhancing conversion efficiency" → extract:
+  - `[carbon vacancies, optimizes, electronic structure]`
+  - `[optimized electronic structure, promotes, charge transfer]`
+  - `[charge transfer, enhances, conversion efficiency]` (if entities exist in Stage 1)
+
+---
+
+#### **⚠️ BRIDGE ENTITY ENFORCEMENT (CRITICAL — NEW)**
+
+You MUST prioritize keeping and connecting:
+
+- SEI
+- Li2S nucleation
+- polysulfide conversion
+- adsorption
+- charge transfer
+
+RULE:
+
+If a mechanism entity exists:
+
+❌ DO NOT leave it as a leaf node
+
+You MUST connect it to:
+
+- at least ONE material
+- at least ONE property
+
+---
+
+Example:
+
+If "adsorption" exists:
+
+You MUST have:
+
+["CoNiCuMnMg@C", "enhances", "adsorption"]
+["adsorption", "affects", "polysulfide conversion"]
+
+---
+
+GOAL:
+
+Ensure mechanism nodes act as GRAPH BRIDGES
+
+---
+
+#### 6. RELATION TYPES (Li–S EXTENDED)
+
+Core relation types:
+
+- forms
+- converts_to
+- reduces_to
+- adsorbs
+- catalyzes
+- enhances
+- inhibits
+- interacts_with
+- part_of
+- related_to
+---
+
+#### **⚠️ CONNECTIVITY COMPLETION RULE (CRITICAL — NEW)**
+
+To eliminate isolated nodes, you MUST ensure:
+
+1. ENTITY COVERAGE:
+   - EVERY entity from Stage 1 MUST appear in AT LEAST ONE triple
+   - If an entity is not used → you MUST create a valid relation if possible
+
+2. WEAK RELATION COMPLETION:
+   If no explicit verb exists, you MAY use safe fallback relations:
+
+   - "related_to"
+   - "associated_with"
+   - "part_of"
+
+   ONLY when:
+   - entities co-occur in same sentence
+   - belong to same system or experiment
+
+3. SYSTEM-LEVEL LINKING (MANDATORY):
+   For system-level entities (electrolyte, cathode, additive):
+
+   ALWAYS ensure:
+   - additive → interacts_with → electrolyte
+   - catalyst → acts_on → polysulfides
+   - material → improves → property (if implied)
+
+4. NO DANGLING ENTITIES:
+   After extraction:
+   - if any entity is not in triples → MUST fix
+
+---
+
+#### **⚠️ MANDATORY EDGE COMPLETION (CRITICAL — NEW)**
+
+If after extraction:
+
+- an entity appears ONLY ONCE
+- or appears in ONLY ONE triple
+
+You MUST:
+
+1. CHECK relation_candidates from Stage 1
+
+2. CREATE at least ONE additional relation using:
+
+   Priority order:
+   a. mechanism-based relation (preferred)
+   b. system-based relation
+   c. fallback relation
+
+3. Allowed fallback relations:
+
+   - "related_to"
+   - "associated_with"
+   - "coexists_with"
+
+4. HARD CONSTRAINT:
+
+   Each entity MUST have:
+   - degree ≥ 2 (recommended)
+   - minimum ≥ 1 (mandatory)
+
+---
+
+**EXAMPLE:**
+
+If:
+- "DOL" appears only once
+
+You MUST add:
+
+["DOL", "related_to", "LiTFSI"]
+
+IF they co-occur in same electrolyte system
+
+---
+
+**GOAL:**
+
+Prevent:
+- leaf nodes
+- single-edge nodes
+- disconnected subgraphs
+
+---
+
+#### 7. DO NOT OVER-GENERALIZE RELATIONS
+
+Only extract relations explicitly supported by text.
+
+If text says:
+"improves electrochemical performance"
+
+→ DO NOT convert to:
+- improves CE ❌
+- improves cycling stability ❌
+
+Unless explicitly stated.
+
+
+**Use relations from schema**: forms, inhibits, suppresses, promotes, leads_to, causes, results_in, etc. (as defined in schema).
+
+**Never** collapse a multi-step mechanism into one direct triple (e.g., only `[Additive, improves, CE]`) when the source explicitly mentions intermediates (e.g., "because of SEI which inhibits...").
+
+Never collapse a multi-step mechanism into one direct triple (e.g., only [carbon vacancies, enhances, conversion efficiency]) when the source explicitly mentions intermediates (e.g., "which in turn promotes...").
+
+**Example**:
+> Source: "CE is improved because of a stable SEI which inhibits the decomposition of electrolyte."
+> Extract BOTH: `[SEI, inhibits, electrolyte decomposition]` AND `[In(NO3)3, improves, SEI]` (if additive is In(NO3)3). Do NOT extract only `[In(NO3)3, improves, CE]` and omit the intermediate step.
+> Source: "The addition of P atoms optimizes the d-band center of MoO2 and enhances the catalytic activity of polysulfide conversion."
+> Extract BOTH: `[P atoms, optimizes, d-band center of MoO2]` AND `[P-MoO2-x/NPC, enhances, catalytic activity of polysulfide conversion]`. Do NOT extract only [P atoms, enhances, catalytic activity] and omit the d-band center intermediate step.
+
+---
+
+#### **⚠️ RELATION DEDUPLICATION (CRITICAL — NEW)**
+
+You MUST eliminate redundant triples:
+
+1. SAME TRIPLE:
+   If subject + relation + object identical → keep ONLY ONE
+
+2. SEMANTICALLY IDENTICAL RELATIONS:
+   - enhances / improves / boosts (same context)
+   → normalize to ONE relation
+
+3. CHAIN PRESERVATION WITHOUT DUPLICATION:
+   - keep multi-hop chains
+   - remove parallel duplicates
+
+---
+
+### OUTPUT FORMAT
+
+Return ONLY a JSON object with:
+- `"triples"`: list of triple objects, each containing:
+  - `"subject"`: canonical entity name (from Stage 1)
+  - `"relation"`: relation type from schema
+  - `"object"`: canonical entity name (from Stage 1)
+  - `"source"`: verbatim text excerpt
+  - `"evidence"`: grammatical structure explanation
+
+**Example Output**:
+```json
+{
+  "triples": [
+    {
+      "subject": "LiNO3",
+      "relation": "forms",
+      "object": "SEI",
+      "source": "LiNO3 forms a stable SEI layer on the lithium anode.",
+      "evidence": "Active clause: 'LiNO3' is subject forming 'SEI' Canonical entities from Stage 1 are used."
+    },
+    {
+      "subject": "SEI",
+      "relation": "suppresses",
+      "object": "polysulfide shuttle",
+      "source": "polysulfide shuttle.",
+      "evidence": "Active voice:  'SEI' acts on 'polysulfide shuttle'. Mechanism chain preserved. Both entities use canonical names from Stage 1 (SEI mapped to 'ethylene carbonate')."
+     },
+    {
+      "subject": "polysulfides",
+      "relation": "are_adsorbed_by",
+      "object": "TiO2",
+      "source": "Polysulfides are strongly adsorbed by TiO2 surfaces.",
+      "evidence": "Passive structure: polysulfides are object, TiO2 is agent."
+    }
+  ]
+}
+```
+
+---
+
+**Schema (Relations):**
+```{schema}```
+
+**Text Chunk:**
+```{chunk}```
+
+**Identified Entities (from Stage 1):**
+```{entities}```
+
+**Abbreviation Mappings (from Stage 1):**
+```{abbreviation_mappings}```
+
+---
+
+Begin relation extraction now. Return ONLY the JSON object.

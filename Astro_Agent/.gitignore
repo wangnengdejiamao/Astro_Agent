@@ -1,0 +1,26 @@
+# Secrets & local
+.env
+.env.local
+*.env.*.local
+analysis_agent/.env
+prompt2graph_for_astronomy/.env
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+.eggs/
+*.egg-info/
+
+# Data / cache / outputs (大文件不入库)
+output/
+data/
+*.sqlite
+*.fits
+*.fits.gz
+
+# Misc
+.DS_Store
+.idea/
+.vscode/

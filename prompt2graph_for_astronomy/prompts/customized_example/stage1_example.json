@@ -1,0 +1,147 @@
+{
+  "默认通用风格（平衡抽取，适用于大多数材料文本）": {
+    "input": "LiPF6 is dissolved in EC/DMC electrolyte. The ionic conductivity is 8.5 mS/cm. SEI formation improves cycling stability.",
+    "output": {
+      "entities": [
+        {
+          "canonical_name": "LiPF6",
+          "variants": ["lithium hexafluorophosphate"],
+          "schema_type": "Salt",
+          "source": "LiPF6 is dissolved in EC/DMC electrolyte.",
+          "evidence": "LiPF6 is a standard electrolyte salt; formula used as canonical name."
+        },
+        {
+          "canonical_name": "ethylene carbonate",
+          "variants": ["EC"],
+          "schema_type": "Solvent",
+          "source": "EC/DMC electrolyte",
+          "evidence": "EC is a standard solvent abbreviation."
+        },
+        {
+          "canonical_name": "dimethyl carbonate",
+          "variants": ["DMC"],
+          "schema_type": "Solvent",
+          "source": "EC/DMC electrolyte",
+          "evidence": "DMC is a standard solvent abbreviation."
+        },
+        {
+          "canonical_name": "ionic conductivity",
+          "variants": [],
+          "schema_type": "Property",
+          "source": "The ionic conductivity is 8.5 mS/cm.",
+          "evidence": "Property extracted without numeric value or unit."
+        },
+        {
+          "canonical_name": "solid electrolyte interphase",
+          "variants": ["SEI"],
+          "schema_type": "InterfacialLayer",
+          "source": "SEI formation improves cycling stability.",
+          "evidence": "SEI is a key interfacial layer."
+        },
+        {
+          "canonical_name": "cycling stability",
+          "variants": [],
+          "schema_type": "PerformanceMetric",
+          "source": "SEI formation improves cycling stability.",
+          "evidence": "Standard performance metric."
+        }
+      ],
+      "abbreviation_mappings": {
+        "EC": "ethylene carbonate",
+        "DMC": "dimethyl carbonate",
+        "SEI": "solid electrolyte interphase"
+      }
+    }
+  },
+
+  "机制优先风格（强调中间过程实体，适合构建多跳推理图谱）": {
+    "input": "FEC additive promotes the formation of a stable SEI, which suppresses lithium dendrite growth.",
+    "output": {
+      "entities": [
+        {
+          "canonical_name": "fluoroethylene carbonate",
+          "variants": ["FEC"],
+          "schema_type": "Additive",
+          "source": "FEC additive promotes the formation of a stable SEI",
+          "evidence": "FEC is the additive; full name used as canonical form."
+        },
+        {
+          "canonical_name": "solid electrolyte interphase",
+          "variants": ["SEI"],
+          "schema_type": "InterfacialLayer",
+          "source": "formation of a stable SEI",
+          "evidence": "Key interfacial layer in mechanism."
+        },
+        {
+          "canonical_name": "lithium dendrite growth",
+          "variants": ["dendrite growth"],
+          "schema_type": "FailureMode",
+          "source": "suppresses lithium dendrite growth",
+          "evidence": "Represents degradation phenomenon."
+        }
+      ],
+      "abbreviation_mappings": {
+        "FEC": "fluoroethylene carbonate",
+        "SEI": "solid electrolyte interphase"
+      }
+    }
+  },
+
+  "去泛指风格（避免additive/material等泛化节点，提升图谱质量）": {
+    "input": "In(NO3)3·6H2O was used as an additive. The additive improves cycling stability.",
+    "output": {
+      "entities": [
+        {
+          "canonical_name": "In(NO3)3·6H2O",
+          "variants": ["In(NO3)3", "additive"],
+          "schema_type": "Additive",
+          "source": "In(NO3)3·6H2O was used as an additive",
+          "evidence": "Specific compound is canonical; 'additive' is referential."
+        },
+        {
+          "canonical_name": "cycling stability",
+          "variants": [],
+          "schema_type": "PerformanceMetric",
+          "source": "improves cycling stability",
+          "evidence": "Standard performance metric."
+        }
+      ],
+      "abbreviation_mappings": {
+        "In(NO3)3": "In(NO3)3·6H2O"
+      }
+    }
+  },
+
+  "细粒度拆分风格（强调溶剂拆分与属性规范化）": {
+    "input": "The electrolyte consists of EC/DMC (3:7 v/v). The ionic conductivity is 8.5 mS/cm.",
+    "output": {
+      "entities": [
+        {
+          "canonical_name": "ethylene carbonate",
+          "variants": ["EC"],
+          "schema_type": "Solvent",
+          "source": "EC/DMC (3:7 v/v)",
+          "evidence": "EC extracted as separate solvent."
+        },
+        {
+          "canonical_name": "dimethyl carbonate",
+          "variants": ["DMC"],
+          "schema_type": "Solvent",
+          "source": "EC/DMC (3:7 v/v)",
+          "evidence": "DMC extracted as separate solvent."
+        },
+        {
+          "canonical_name": "ionic conductivity",
+          "variants": [],
+          "schema_type": "Property",
+          "source": "The ionic conductivity is 8.5 mS/cm.",
+          "evidence": "Property normalized without value."
+        }
+      ],
+      "abbreviation_mappings": {
+        "EC": "ethylene carbonate",
+        "DMC": "dimethyl carbonate"
+      }
+    }
+  }
+}

@@ -1,0 +1,132 @@
+{
+  "默认通用风格（平衡抽取，适用于大多数科学文本）": {
+    "input": "Graphene oxide (GO) enhances the mechanical strength of the composite material. The degradation rate is 5% per hour.",
+    "output": {
+      "entities": [
+        {
+          "canonical_name": "graphene oxide",
+          "variants": ["GO"],
+          "schema_type": "Material",
+          "source": "Graphene oxide (GO) enhances",
+          "evidence": "Full name is canonical. GO is standard abbreviation in parentheses."
+        },
+        {
+          "canonical_name": "mechanical strength",
+          "variants": [],
+          "schema_type": "Property",
+          "source": "enhances the mechanical strength",
+          "evidence": "Property extracted without numeric value."
+        },
+        {
+          "canonical_name": "composite material",
+          "variants": [],
+          "schema_type": "Material",
+          "source": "composite material",
+          "evidence": "Material system entity."
+        },
+        {
+          "canonical_name": "degradation rate",
+          "variants": [],
+          "schema_type": "Property",
+          "source": "degradation rate is 5% per hour",
+          "evidence": "Property extracted without specific value."
+        }
+      ],
+      "abbreviation_mappings": {
+        "GO": "graphene oxide"
+      }
+    }
+  },
+
+  "生物医学风格（强调生物实体和过程）": {
+    "input": "The expression of p53 protein inhibits tumor cell proliferation through cell cycle regulation.",
+    "output": {
+      "entities": [
+        {
+          "canonical_name": "p53 protein",
+          "variants": ["p53"],
+          "schema_type": "Protein",
+          "source": "expression of p53 protein",
+          "evidence": "Specific protein entity."
+        },
+        {
+          "canonical_name": "tumor cell proliferation",
+          "variants": [],
+          "schema_type": "BiologicalProcess",
+          "source": "inhibits tumor cell proliferation",
+          "evidence": "Biological process as entity."
+        },
+        {
+          "canonical_name": "cell cycle regulation",
+          "variants": [],
+          "schema_type": "BiologicalProcess",
+          "source": "through cell cycle regulation",
+          "evidence": "Regulatory process entity."
+        }
+      ],
+      "abbreviation_mappings": {}
+    }
+  },
+
+  "材料科学风格（强调材料组成和性能）": {
+    "input": "TiO2 nanoparticles exhibit high photocatalytic activity under UV irradiation.",
+    "output": {
+      "entities": [
+        {
+          "canonical_name": "TiO2",
+          "variants": ["titanium dioxide"],
+          "schema_type": "ChemicalCompound",
+          "source": "TiO2 nanoparticles",
+          "evidence": "Chemical formula as canonical name."
+        },
+        {
+          "canonical_name": "photocatalytic activity",
+          "variants": [],
+          "schema_type": "Property",
+          "source": "high photocatalytic activity",
+          "evidence": "Material property."
+        },
+        {
+          "canonical_name": "UV irradiation",
+          "variants": ["ultraviolet irradiation"],
+          "schema_type": "ExperimentalCondition",
+          "source": "under UV irradiation",
+          "evidence": "Experimental condition."
+        }
+      ],
+      "abbreviation_mappings": {}
+    }
+  },
+
+  "机制优先风格（强调因果关系和中间过程）": {
+    "input": "ROS generation leads to DNA damage, which activates the apoptosis pathway.",
+    "output": {
+      "entities": [
+        {
+          "canonical_name": "ROS generation",
+          "variants": ["reactive oxygen species generation"],
+          "schema_type": "BiologicalProcess",
+          "source": "ROS generation leads to",
+          "evidence": "Process as first-class entity for mechanism."
+        },
+        {
+          "canonical_name": "DNA damage",
+          "variants": [],
+          "schema_type": "Phenomenon",
+          "source": "leads to DNA damage",
+          "evidence": "Key intermediate in causal chain."
+        },
+        {
+          "canonical_name": "apoptosis pathway",
+          "variants": [],
+          "schema_type": "BiologicalProcess",
+          "source": "activates the apoptosis pathway",
+          "evidence": "Downstream process in mechanism."
+        }
+      ],
+      "abbreviation_mappings": {
+        "ROS": "reactive oxygen species"
+      }
+    }
+  }
+}

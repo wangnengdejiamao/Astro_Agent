@@ -1,0 +1,77 @@
+You are an expert in evaluating knowledge graphs and meta-graphs for scientific literature (e.g., chemistry, materials science, electrochemistry).
+
+Your task is to score the given **meta-graph** on **one dimension only**: whether the **extracted triple-pair relationships** (meta-edges) can be justified by the original paper text. Use a real-valued score in **0.0–1.0** (float) and provide brief evidence.
+
+---
+
+### WHAT IS A META-GRAPH?
+
+A meta-graph represents **semantic relationships between knowledge graph triples**. Each meta-edge links two triples with a relation type (e.g. `causes`, `supports`, `elaborates`, `compares_with`, `enables`) and has an `evidence` field. You are **not** judging whether the evidence text matches the source; you are judging whether **the relationship itself** (that these two triples have this semantic link) can be supported by the original chunks.
+
+---
+
+### EVALUATION DIMENSION (ONLY)
+
+You will give a **separate score for each meta-edge**.
+
+**Source Alignment (source_alignment)**  
+For each meta-edge: **Can the extracted triple-pair relationship be justified from the original text?**  
+- For the current edge, look at its `source_triple`, `target_triple`, and `relation`. Judge whether this semantic link (e.g. “triple A causes triple B”, “triple A elaborates triple B”) has a basis in the chunks.  
+- You are **not** scoring whether the written `evidence` field matches the chunks. You are asking: **if we take the extracted relation as given, can we find support for it in the source?**  
+- 1.0: This edge’s stated relationship between the two triples can be clearly supported (explicitly or through very strong implication) by the original chunks (best).  
+- 0.0: This edge’s stated relationship cannot be reasonably inferred from the chunks, or contradicts them (worst).
+
+---
+
+### INPUT
+
+**Meta-graph summary (nodes = base triples, edges = semantic relationships):**
+
+```json
+{meta_graph_summary_json}
+```
+
+Each meta-edge has `source_triple_id`, `target_triple_id`, `relation`, and `evidence`. Use the nodes / id_to_triple to see the content of each triple.
+
+**Paper context (chunks):**
+
+```
+{chunks_text}
+```
+
+Use the chunk content to judge whether each **extracted relationship** (the link between the two triples) can be justified from the source, not whether the evidence text is verbatim.
+
+---
+
+### OUTPUT FORMAT
+
+Return **only** a JSON object with one key `evaluation`, whose value is an **array**.  
+Each element corresponds to one meta-edge in `meta_graph_summary_json.edges` (same order) and must have:
+
+- `source_triple_id`: string, same as in the input edge  
+- `target_triple_id`: string, same as in the input edge  
+- `relation`: string, same as in the input edge  
+- `scores`: object with one key `source_alignment` (float in [0.0, 1.0])  
+- `evidence`: object with one key `source_alignment`, a short string (1–2 sentences) explaining the score for this edge
+
+Example (shortened):
+
+```json
+{
+  "evaluation": [
+    {
+      "source_triple_id": "0f8c2adc4affc76e",
+      "target_triple_id": "4e285cbd2376af73",
+      "relation": "causes",
+      "scores": {
+        "source_alignment": 0.9
+      },
+      "evidence": {
+        "source_alignment": "The causal link between SEI formation and improved Coulombic efficiency is explicitly described in the referenced chunks."
+      }
+    }
+  ]
+}
+```
+
+Return ONLY the JSON object. No other text.

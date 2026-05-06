@@ -1,0 +1,52 @@
+logging:
+  level: INFO
+
+dataset:
+  name: test_dataset
+  corpus_path: input/test/corpus.json
+  is_chunked: false
+
+schema:
+  name: electrolytes
+
+extraction:
+  use_staged_extraction: true
+  # 保留 Stage4 验证（保证图谱质量）
+  use_stage4_validation: true
+  # 不保存中间 staged 输出
+  save_stage_outputs: false
+
+  stage4:
+    min_triple_score: 0
+    min_node_score: 0
+    use_chunk_scoring: false
+    use_node_accuracy_scoring: true
+    use_triple_support_scoring: true
+
+deduplication:
+  enable_abbreviation: true
+  # 保留 CID 查询（保证实体消歧质量）
+  enable_cid: true
+  intermediate_output: false
+  pubchem_db_path: pubchem_names_full.db
+
+# 关闭元图谱构建（不影响图谱质量）
+meta_graph:
+  enable: false
+
+# 关闭元图谱评估
+meta_graph_evaluation:
+  enable: false
+
+# 关闭社区聚类（不影响图谱质量）
+community_clustering:
+  enable: false
+
+# 关闭社区评估
+community_evaluation:
+  enable: false
+
+output:
+  graph_name: multi_stage_deduplicated.json
+  neo4j:
+    enable: false

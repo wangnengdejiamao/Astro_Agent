@@ -1,0 +1,51 @@
+logging:
+  level: INFO
+
+dataset:
+  name: white_dwarf_kg_deepseek_stage123
+  # The corpus should be generated from the RAG database or curated PDFs before
+  # this pipeline is launched. Keep this path stable so reruns are reproducible.
+  corpus_path: input/white_dwarf_kg_deepseek/corpus_cleaned.json
+  is_chunked: false
+
+schema:
+  name: white_dwarf_astronomy
+
+extraction:
+  use_staged_extraction: true
+  # User requested DeepSeek for stage1/2/3 and community clustering.
+  # Stage4 is intentionally off by default because it is the largest token sink.
+  use_stage4_validation: false
+  save_stage_outputs: true
+  prompt_paths:
+    stage1: prompts/white_dwarf_staged/stage1_entity_recognition.txt
+    stage2: prompts/white_dwarf_staged/stage2_relation_extraction.txt
+    stage3: prompts/white_dwarf_staged/stage3_attribute_extraction.txt
+
+deduplication:
+  enable_abbreviation: true
+  enable_cid: false
+  intermediate_output: true
+  pubchem_db_path: ""
+
+meta_graph:
+  enable: false
+
+meta_graph_evaluation:
+  enable: false
+
+community_clustering:
+  enable: true
+  method: leiden
+  max_cluster_size: 900
+  use_lcc: false
+  seed: 42
+  llm_prompt_path: prompts/lowlevel_leiden_community_report.txt
+
+community_evaluation:
+  enable: false
+
+output:
+  graph_name: multi_stage_deduplicated.json
+  neo4j:
+    enable: false

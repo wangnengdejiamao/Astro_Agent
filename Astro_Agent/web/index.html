@@ -1,0 +1,491 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Astro_Agent · 控制台</title>
+<style>
+  :root {
+    --mint: #12CCB9;
+    --mint-soft: #E6FAF7;
+    --ink: #2F3A45;
+    --gray: #ECEFF3;
+    --red: #FF6B6B;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    font-family: 'Inter', 'Helvetica Neue', 'Source Han Sans SC', sans-serif;
+    color: var(--ink);
+    background: #FFFFFF;
+  }
+  header {
+    padding: 22px 36px;
+    border-bottom: 1px solid var(--gray);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+  }
+  .bar { width: 6px; height: 32px; background: var(--mint); border-radius: 3px; }
+  h1 { margin: 0; font-size: 22px; font-weight: 800; }
+  .sub { color: #8a96a3; font-size: 13px; font-style: italic; }
+  .health {
+    margin-left: auto;
+    font-size: 12px;
+    color: #6b7785;
+    display: flex;
+    gap: 14px;
+    align-items: center;
+  }
+  .dot { width: 8px; height: 8px; border-radius: 50%; background: var(--mint); display: inline-block; margin-right: 6px; }
+  .dot.bad { background: var(--red); }
+
+  nav {
+    display: flex; gap: 4px;
+    padding: 0 36px;
+    border-bottom: 1px solid var(--gray);
+    background: #fafbfc;
+  }
+  nav button {
+    background: transparent; border: 0; padding: 14px 18px;
+    font-size: 14px; cursor: pointer; color: #6b7785;
+    border-bottom: 2px solid transparent;
+  }
+  nav button.active { color: var(--mint); border-bottom-color: var(--mint); font-weight: 700; }
+
+  main { padding: 28px 36px; max-width: 1200px; }
+  .panel { display: none; }
+  .panel.active { display: block; }
+
+  .row { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 12px; }
+  label { font-size: 12px; color: #6b7785; display: block; margin-bottom: 4px; }
+  input, textarea, select {
+    width: 100%; padding: 9px 12px; border: 1px solid var(--gray);
+    border-radius: 8px; font-size: 14px; font-family: inherit;
+    background: #fff; color: var(--ink);
+  }
+  input:focus, textarea:focus { outline: 2px solid var(--mint); border-color: var(--mint); }
+  textarea { min-height: 96px; resize: vertical; }
+  .field { flex: 1 1 180px; }
+
+  button.primary {
+    background: var(--mint); color: white; border: 0; padding: 10px 22px;
+    border-radius: 8px; font-weight: 700; cursor: pointer; font-size: 14px;
+  }
+  button.primary:disabled { opacity: 0.5; cursor: not-allowed; }
+  button.ghost {
+    background: transparent; border: 1px solid var(--mint); color: var(--mint);
+    padding: 9px 16px; border-radius: 8px; cursor: pointer; font-size: 13px;
+  }
+
+  .out {
+    margin-top: 14px; background: #0f1721; color: #d8e2ec;
+    border-radius: 10px; padding: 16px; font-family: 'JetBrains Mono', Consolas, monospace;
+    font-size: 12px; max-height: 480px; overflow: auto; white-space: pre-wrap; word-break: break-all;
+  }
+  .card {
+    border: 1px solid var(--gray); border-radius: 12px; padding: 18px;
+    margin-bottom: 18px; background: #fff;
+  }
+  .card h2 {
+    margin: 0 0 4px; font-size: 16px; color: var(--ink);
+    display: flex; align-items: center; gap: 10px;
+  }
+  .card h2::before {
+    content: ''; width: 4px; height: 16px; background: var(--mint); border-radius: 2px;
+  }
+  .card .hint { color: #8a96a3; font-size: 12px; margin-bottom: 12px; }
+
+  .pill {
+    display: inline-block; padding: 2px 10px; border-radius: 999px;
+    background: var(--mint-soft); color: var(--mint); font-size: 11px; font-weight: 700;
+  }
+  footer { padding: 14px 36px; color: #8a96a3; font-size: 12px; border-top: 1px solid var(--gray); }
+</style>
+</head>
+<body>
+<header>
+  <div class="bar"></div>
+  <div>
+    <h1>Astro_Agent · 控制台</h1>
+    <div class="sub">Toolbox + RAG + KG + LangGraph Agent</div>
+  </div>
+  <div class="health" id="health">
+    <span><span class="dot" id="dot-llm"></span><span id="t-llm">LLM …</span></span>
+    <span><span class="dot" id="dot-rag"></span><span id="t-rag">RAG …</span></span>
+    <span><span class="dot" id="dot-kg"></span><span id="t-kg">KG …</span></span>
+  </div>
+</header>
+
+<nav id="nav">
+  <button data-tab="agent" class="active">Agent 全流程</button>
+  <button data-tab="writing">写作 Agent</button>
+  <button data-tab="rag">RAG 检索</button>
+  <button data-tab="kg">知识图谱</button>
+  <button data-tab="toolbox">astro_toolbox</button>
+  <button data-tab="gui">Toolbox GUI</button>
+  <button data-tab="codex">Codex / Claude</button>
+  <button data-tab="cctb">Claude Code 工具箱</button>
+  <button data-tab="runs">历史 Runs</button>
+</nav>
+
+<main>
+
+<!-- AGENT -->
+<section class="panel active" data-panel="agent">
+  <div class="card">
+    <h2>跑一次 Chief Investigator <span class="pill">LangGraph</span></h2>
+    <div class="hint">输入目标名（或同时给 RA/Dec）。`--execute` 会真实下载与拟合；默认 dry-run。</div>
+    <div class="row">
+      <div class="field"><label>Target</label><input id="ag-target" value="Gaia DR3 865415642195374464" /></div>
+      <div class="field"><label>RA (deg)</label><input id="ag-ra" type="number" step="any" value="232.3955" /></div>
+      <div class="field"><label>Dec (deg)</label><input id="ag-dec" type="number" step="any" value="29.4672" /></div>
+    </div>
+    <div class="row">
+      <label style="flex:1"><input type="checkbox" id="ag-execute" /> --execute (真实跑模块)</label>
+      <label style="flex:1"><input type="checkbox" id="ag-llm" checked /> --use-llm (DeepSeek 写作)</label>
+      <button class="primary" id="ag-run">运行</button>
+    </div>
+    <div class="out" id="ag-out">等待运行…</div>
+  </div>
+</section>
+
+<!-- WRITING -->
+<section class="panel" data-panel="writing">
+  <div class="card">
+    <h2>写作 Agent · PaperOrchestra <span class="pill">section-wise + LLM reviewer</span></h2>
+    <div class="hint">挑一个已有的 run 目录，单独跑写作流水线（不重跑数据/拟合）。每节单独写 → LLM 评分 → 自动重写最弱节，达 target_score 即停。</div>
+    <div class="row">
+      <div class="field" style="flex:2"><label>Run 目录名</label>
+        <input id="wr-run" placeholder="ZTFJ152934_full_agent_run" /></div>
+      <div class="field"><label>Target score</label><input id="wr-score" type="number" value="80" /></div>
+      <div class="field"><label>Max iters</label><input id="wr-iters" type="number" value="3" /></div>
+      <div class="field" style="display:flex;align-items:flex-end">
+        <label><input type="checkbox" id="wr-llm" checked /> use_llm</label>
+      </div>
+      <div class="field" style="display:flex;align-items:flex-end">
+        <label><input type="checkbox" id="wr-sw" checked /> sectionwise</label>
+      </div>
+      <button class="primary" id="wr-run-btn">跑写作</button>
+      <button class="ghost" id="wr-list-btn">列 sections</button>
+    </div>
+    <div class="out" id="wr-out">先点上方「列 sections」看现有产物，或点「跑写作」生成新草稿。</div>
+  </div>
+</section>
+
+<!-- RAG -->
+<section class="panel" data-panel="rag">
+  <div class="card">
+    <h2>RAG 检索 <span class="pill">white_dwarf_rag.sqlite</span></h2>
+    <div class="hint">支持向量 + 关键词混合检索。勾选「method_only」只返回方法学段落。</div>
+    <div class="row">
+      <div class="field" style="flex:3"><label>Query</label>
+        <input id="rag-q" value="white dwarf SED fitting Gaia parallax effective temperature" /></div>
+      <div class="field"><label>Top K</label><input id="rag-k" type="number" value="5" /></div>
+      <div class="field" style="display:flex;align-items:flex-end">
+        <label><input type="checkbox" id="rag-method" /> method_only</label>
+      </div>
+      <button class="primary" id="rag-run">检索</button>
+    </div>
+    <div class="out" id="rag-out">等待检索…</div>
+  </div>
+</section>
+
+<!-- KG -->
+<section class="panel" data-panel="kg">
+  <div class="card">
+    <h2>知识图谱 <span class="pill">12,740 节点 / 83,782 边</span></h2>
+    <div class="hint">每行一个 query，用 ; 分隔多个查询。返回方法迁移路径。</div>
+    <div class="row">
+      <div class="field" style="flex:3"><label>Queries (用 ; 分隔)</label>
+        <input id="kg-q" value="SED fitting Bayesian inference parallax cooling age; 6D phase space orbit traceback" /></div>
+      <div class="field"><label>Limit</label><input id="kg-k" type="number" value="12" /></div>
+      <button class="primary" id="kg-run">检索</button>
+    </div>
+    <div class="out" id="kg-out">等待检索…</div>
+  </div>
+</section>
+
+<!-- TOOLBOX -->
+<section class="panel" data-panel="toolbox">
+  <div class="card">
+    <h2>astro_toolbox 单模块调用</h2>
+    <div class="hint">直接给 RA/Dec 调一个模块函数，例如 sdss.query_spectrum / ztf.query_lightcurve / sed.SEDFitter。</div>
+    <div class="row">
+      <div class="field"><label>Module</label>
+        <select id="tb-module">
+          <option>sdss</option><option>desi</option><option>lamost</option>
+          <option>ztf</option><option>wise</option><option>gaia_lc</option><option>tess</option>
+          <option>galex</option><option>twomass</option><option>xray</option>
+          <option>sed</option><option>hr_diagram</option>
+        </select></div>
+      <div class="field"><label>Function</label><input id="tb-fn" value="query_spectrum" /></div>
+      <div class="field"><label>RA</label><input id="tb-ra" type="number" step="any" value="190.305" /></div>
+      <div class="field"><label>Dec</label><input id="tb-dec" type="number" step="any" value="2.596" /></div>
+      <div class="field"><label>radius_arcsec</label><input id="tb-r" type="number" step="any" value="3" /></div>
+      <button class="primary" id="tb-run">调用</button>
+    </div>
+    <div class="out" id="tb-out">等待调用…</div>
+  </div>
+</section>
+
+<!-- TOOLBOX GUI (multi-module, mirror of gui.py) -->
+<section class="panel" data-panel="gui">
+  <div class="card">
+    <h2>Toolbox GUI · 多模块单目标 <span class="pill">AstroQueryAll</span></h2>
+    <div class="hint">等价于 `python -m astro_toolbox.gui`：勾选模块 → 给 RA/Dec → 一键全跑，结果产物（PNG/CSV）会列在下方可点开。</div>
+    <div class="row">
+      <div class="field"><label>RA (deg)</label><input id="g-ra" type="number" step="any" value="190.305" /></div>
+      <div class="field"><label>Dec (deg)</label><input id="g-dec" type="number" step="any" value="2.596" /></div>
+      <div class="field" style="display:flex;align-items:flex-end;gap:8px">
+        <button class="ghost" id="g-all">全选</button>
+        <button class="ghost" id="g-none">清空</button>
+      </div>
+      <button class="primary" id="g-run">运行 AstroQueryAll</button>
+    </div>
+    <div id="g-modules" style="display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px 14px;margin:14px 0;font-size:13px;"></div>
+    <div class="out" id="g-out">先「全选」或勾选若干模块，然后点「运行」。</div>
+    <div id="g-gallery" style="display:flex;flex-wrap:wrap;gap:10px;margin-top:12px;"></div>
+  </div>
+</section>
+
+<!-- CODEX -->
+<section class="panel" data-panel="codex">
+  <div class="card">
+    <h2>Codex CLI / Claude Code 子进程</h2>
+    <div class="hint">让 agent 把代码 / 工程任务派给 Codex 或 Claude Code。本地子进程，受超时约束。</div>
+    <div class="row">
+      <div class="field" style="flex:1"><label>cwd (可选)</label><input id="cx-cwd" placeholder="/mnt/c/Users/Administrator/Desktop/rag/Astro_Agent" /></div>
+      <div class="field"><label>Timeout (秒)</label><input id="cx-to" type="number" value="600" /></div>
+    </div>
+    <label>Prompt</label>
+    <textarea id="cx-prompt">总结 analysis_agent/workflow.py 的节点拓扑，给出可改进点。</textarea>
+    <div class="row" style="margin-top:10px">
+      <button class="primary" id="cx-codex">调用 Codex</button>
+      <button class="ghost" id="cx-claude">调用 Claude Code</button>
+    </div>
+    <div class="out" id="cx-out">等待调用…</div>
+  </div>
+</section>
+
+<!-- CLAUDE CODE TOOLBOX -->
+<section class="panel" data-panel="cctb">
+  <div class="card">
+    <h2>Claude Code 工具箱</h2>
+    <div class="hint">展示 Claude Code 任务（tool_write / code_review / bug_fix / paper_refine / latex_check / experiment_audit）。仅展示与人工复核，不会自动合入。</div>
+    <div class="row">
+      <input id="cctb-run" placeholder="run_id (例如 20260428T120000Z)" />
+      <button class="ghost" id="cctb-refresh">刷新</button>
+      <select id="cctb-type">
+        <option value="paper_refine">paper_refine</option>
+        <option value="code_review">code_review</option>
+        <option value="tool_write">tool_write</option>
+        <option value="bug_fix">bug_fix</option>
+        <option value="latex_check">latex_check</option>
+        <option value="experiment_audit">experiment_audit</option>
+      </select>
+      <button class="primary" id="cctb-dry">Dry-run 构建</button>
+    </div>
+    <div class="out" id="cctb-out">输入 run_id 后点击刷新。</div>
+  </div>
+</section>
+
+<!-- RUNS -->
+<section class="panel" data-panel="runs">
+  <div class="card">
+    <h2>历史 Runs</h2>
+    <div class="hint">列出 output/analysis_agent/* 目录；点击文件名读取产物 JSON。</div>
+    <button class="ghost" id="runs-refresh">刷新</button>
+    <div class="out" id="runs-out">点击「刷新」加载历史…</div>
+  </div>
+</section>
+
+</main>
+
+<footer>林佳茂 · 中山大学物理与天文学院 · Astro_Agent · 2026</footer>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const api = (path, body) => fetch(path, {
+  method: body ? 'POST' : 'GET',
+  headers: { 'Content-Type': 'application/json' },
+  body: body ? JSON.stringify(body) : undefined,
+}).then(r => r.json());
+const show = (el, data) => el.textContent = (typeof data === 'string') ? data : JSON.stringify(data, null, 2);
+
+// Tabs
+document.querySelectorAll('#nav button').forEach(b => b.onclick = () => {
+  document.querySelectorAll('#nav button').forEach(x => x.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach(x => x.classList.remove('active'));
+  b.classList.add('active');
+  document.querySelector(`[data-panel="${b.dataset.tab}"]`).classList.add('active');
+});
+
+// Health
+api('/api/health').then(h => {
+  const setDot = (id, ok, label) => {
+    $(`dot-${id}`).classList.toggle('bad', !ok);
+    $(`t-${id}`).textContent = label;
+  };
+  setDot('llm', h.llm_available, `LLM ${h.provider}/${h.model} ${h.llm_available ? '✓' : '✗'}`);
+  setDot('rag', h.rag_db_exists, `RAG ${h.rag_db_exists ? '✓' : '✗'}`);
+  setDot('kg', h.kg_index_exists, `KG ${h.kg_index_exists ? '✓' : '✗'}`);
+}).catch(e => show($('health'), 'health failed'));
+
+// Agent
+$('ag-run').onclick = async () => {
+  const btn = $('ag-run'); btn.disabled = true;
+  show($('ag-out'), '运行中… (可能耗时 30s ~ 数分钟)');
+  try {
+    const r = await api('/api/agent/run', {
+      target: $('ag-target').value,
+      ra: parseFloat($('ag-ra').value) || null,
+      dec: parseFloat($('ag-dec').value) || null,
+      execute: $('ag-execute').checked,
+      use_llm: $('ag-llm').checked,
+    });
+    show($('ag-out'), r);
+  } catch (e) { show($('ag-out'), String(e)); }
+  btn.disabled = false;
+};
+
+// RAG
+$('rag-run').onclick = async () => {
+  show($('rag-out'), '检索中…');
+  const r = await api('/api/rag/search', {
+    query: $('rag-q').value,
+    method_only: $('rag-method').checked,
+    limit: parseInt($('rag-k').value),
+  });
+  show($('rag-out'), r);
+};
+
+// KG
+$('kg-run').onclick = async () => {
+  show($('kg-out'), '检索中…');
+  const queries = $('kg-q').value.split(';').map(s => s.trim()).filter(Boolean);
+  const r = await api('/api/kg/search', { queries, limit: parseInt($('kg-k').value) });
+  show($('kg-out'), r);
+};
+
+// Toolbox
+$('tb-run').onclick = async () => {
+  show($('tb-out'), '调用中…');
+  const r = await api('/api/toolbox/run', {
+    module: $('tb-module').value,
+    function: $('tb-fn').value,
+    ra: parseFloat($('tb-ra').value),
+    dec: parseFloat($('tb-dec').value),
+    radius_arcsec: parseFloat($('tb-r').value),
+  });
+  show($('tb-out'), r);
+};
+
+// Toolbox GUI: load modules + render checkboxes
+(async function () {
+  const r = await api('/api/gui/modules');
+  const groups = {};
+  r.modules.forEach(m => { (groups[m.group] = groups[m.group] || []).push(m); });
+  const root = $('g-modules');
+  Object.entries(groups).forEach(([grp, mods]) => {
+    const head = document.createElement('div');
+    head.style.cssText = 'grid-column:1/-1;color:#12CCB9;font-weight:700;margin-top:6px;font-size:12px;';
+    head.textContent = grp;
+    root.appendChild(head);
+    mods.forEach(m => {
+      const id = 'gm-' + m.name.replace(/[^A-Za-z0-9]+/g, '_');
+      const lbl = document.createElement('label');
+      lbl.style.cssText = 'display:flex;align-items:center;gap:6px;color:#2F3A45;cursor:pointer;';
+      lbl.innerHTML = `<input type="checkbox" data-mod="${m.name}" id="${id}" /><span title="${m.desc}">${m.name}</span>`;
+      root.appendChild(lbl);
+    });
+  });
+})();
+$('g-all').onclick = () => $('g-modules').querySelectorAll('input[type=checkbox]').forEach(c => c.checked = true);
+$('g-none').onclick = () => $('g-modules').querySelectorAll('input[type=checkbox]').forEach(c => c.checked = false);
+$('g-run').onclick = async () => {
+  const btn = $('g-run'); btn.disabled = true;
+  const enabled = [...$('g-modules').querySelectorAll('input[type=checkbox]:checked')].map(c => c.dataset.mod);
+  show($('g-out'), `运行中… 模块=${enabled.length}（可能数十秒至数分钟）`);
+  $('g-gallery').innerHTML = '';
+  try {
+    const r = await api('/api/gui/run', {
+      ra: parseFloat($('g-ra').value),
+      dec: parseFloat($('g-dec').value),
+      enabled_modules: enabled,
+    });
+    show($('g-out'), { status: r.status, output_dir: r.output_dir, statuses: r.statuses, n_plots: (r.plots || []).length, n_csvs: (r.csvs || []).length });
+    (r.plots || []).forEach(p => {
+      const img = document.createElement('img');
+      img.src = '/api/files/' + p; img.title = p;
+      img.style.cssText = 'max-height:160px;border:1px solid #ECEFF3;border-radius:8px;background:#fff;';
+      $('g-gallery').appendChild(img);
+    });
+  } catch (e) { show($('g-out'), String(e)); }
+  btn.disabled = false;
+};
+
+// Codex / Claude
+const callExec = async (path) => {
+  show($('cx-out'), '执行中…');
+  const r = await api(path, {
+    prompt: $('cx-prompt').value,
+    cwd: $('cx-cwd').value || null,
+    timeout: parseInt($('cx-to').value),
+  });
+  show($('cx-out'), r);
+};
+$('cx-codex').onclick = () => callExec('/api/codex/exec');
+$('cx-claude').onclick = () => callExec('/api/claude/exec');
+
+// Writing
+$('wr-run-btn').onclick = async () => {
+  const btn = $('wr-run-btn'); btn.disabled = true;
+  show($('wr-out'), '写作中… (use_llm 时可能需要 30s ~ 数分钟)');
+  try {
+    const r = await api('/api/paper/draft', {
+      run_name: $('wr-run').value.trim(),
+      use_llm: $('wr-llm').checked,
+      sectionwise: $('wr-sw').checked,
+      target_score: parseInt($('wr-score').value),
+      max_iters: parseInt($('wr-iters').value),
+    });
+    show($('wr-out'), r);
+  } catch (e) { show($('wr-out'), String(e)); }
+  btn.disabled = false;
+};
+$('wr-list-btn').onclick = async () => {
+  const name = $('wr-run').value.trim();
+  if (!name) { show($('wr-out'), '请先填 run 目录名'); return; }
+  show($('wr-out'), '加载中…');
+  const r = await fetch(`/api/paper/sections/${encodeURIComponent(name)}`).then(x => x.json());
+  show($('wr-out'), r);
+};
+
+// Runs
+$('runs-refresh').onclick = async () => {
+  show($('runs-out'), '加载中…');
+  const r = await api('/api/runs');
+  show($('runs-out'), r);
+};
+
+// Claude Code Toolbox
+$('cctb-refresh').onclick = async () => {
+  const id = $('cctb-run').value.trim();
+  if (!id) { show($('cctb-out'), '请填写 run_id'); return; }
+  show($('cctb-out'), '加载中…');
+  const r = await api('/api/claude_code/runs/' + encodeURIComponent(id));
+  show($('cctb-out'), r);
+};
+$('cctb-dry').onclick = async () => {
+  const type = $('cctb-type').value;
+  const r = await api('/api/claude_code/task', {
+    method: 'POST',
+    headers: {'Content-Type':'application/json'},
+    body: JSON.stringify({type, inputs: {}, dry_run: true}),
+  });
+  show($('cctb-out'), r);
+};
+</script>
+</body>
+</html>

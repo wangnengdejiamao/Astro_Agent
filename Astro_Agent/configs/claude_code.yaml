@@ -1,0 +1,41 @@
+# Configuration for the Claude Code toolbox layer.
+# This is *additive* — analysis_agent, astro_toolbox, RAG, KG, PaperOrchestra
+# and the QA Gate continue to run unchanged when this layer is disabled.
+
+enabled: false                   # global on/off; CLI/server override is honored
+backend: headless                # headless | sdk
+permission_mode: plan            # plan | acceptEdits | bypassPermissions
+timeout_sec: 600
+runs_root: runs
+
+# Path policy. Aligns with claude_code_toolbox/safety/permissions.py.
+permissions:
+  deny:
+    - .env
+    - secrets/
+    - data/raw/
+    - configs/production.yaml
+  write_allow:
+    - astro_toolbox/
+    - analysis_agent/
+    - tests/
+    - docs/
+    - papers/drafts/
+    - runs/
+
+# Routing toggles. The router still inspects state to decide; these are caps.
+routing:
+  bug_fix: true
+  tool_write: true
+  paper_refine: true
+  latex_check: true
+  code_review: true
+  experiment_audit: true
+
+# Safety: every code-modifying task requires human review by default.
+# Paper refinement is guarded against introducing new science claims.
+safety:
+  human_review_required: true
+  paper_refiner_block_new_claims: true
+  forbid_git_commit: true
+  forbid_git_push: true

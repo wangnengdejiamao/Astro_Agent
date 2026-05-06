@@ -1,0 +1,3358 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>图谱管理 - 图谱可视化系统</title>
+    
+    <!-- CDN Dependencies -->
+    <script src="https://cdn.jsdelivr.net/npm/axios@1.6.2/dist/axios.min.js"></script>
+
+    <!-- Markdown render (for stage4 prompt templates) -->
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/dompurify@3.1.6/dist/purify.min.js"></script>
+    
+    <!-- KaTeX for LaTeX rendering -->
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.css">
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/katex.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/katex@0.16.9/dist/contrib/auto-render.min.js"></script>
+    
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+        
+        html, body {
+            height: 100%;
+            overflow: hidden;
+        }
+        
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: #f5f7fa;
+            color: #2c3e50;
+        }
+        
+        /* 导航栏样式 */
+        .navbar {
+            background: #667eea;
+            padding: 0 30px;
+            box-shadow: 0 2px 10px rgba(0,0,0,0.1);
+        }
+        
+        .navbar-content {
+            display: flex;
+            align-items: center;
+            height: 60px;
+        }
+        
+        .navbar-brand {
+            font-size: 20px;
+            font-weight: 600;
+            color: #fff;
+            text-decoration: none;
+            margin-right: 40px;
+        }
+        
+        .navbar-nav {
+            display: flex;
+            list-style: none;
+            gap: 5px;
+        }
+        
+        .nav-link {
+            display: block;
+            padding: 10px 20px;
+            color: rgba(255,255,255,0.85);
+            text-decoration: none;
+            border-radius: 6px;
+            transition: all 0.3s;
+            font-size: 14px;
+        }
+        
+        .nav-link:hover {
+            background: rgba(255,255,255,0.15);
+            color: #fff;
+        }
+        
+        .nav-link.active {
+            background: rgba(255,255,255,0.25);
+            color: #fff;
+            font-weight: 500;
+        }
+        
+        .page-wrapper {
+            height: calc(100vh - 60px);
+            overflow-y: auto;
+        }
+        
+        .page-container {
+            padding: 30px;
+            max-width: 1400px;
+            margin: 0 auto;
+        }
+        
+        .page-header {
+            margin-bottom: 20px;
+        }
+        
+        .page-header h1 {
+            font-size: 24px;
+            color: #2c3e50;
+            margin-bottom: 10px;
+        }
+        
+        /* Tab 样式 */
+        .main-tabs {
+            display: flex;
+            gap: 0;
+            background: #fff;
+            border-radius: 8px 8px 0 0;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            overflow: hidden;
+        }
+        
+        .main-tab {
+            flex: 1;
+            padding: 15px 20px;
+            border: none;
+            background: #f5f7fa;
+            color: #606266;
+            font-size: 15px;
+            cursor: pointer;
+            transition: all 0.3s;
+            border-bottom: 3px solid transparent;
+        }
+        
+        .main-tab:hover {
+            background: #eef1f6;
+            color: #409eff;
+        }
+        
+        .main-tab.active {
+            background: #fff;
+            color: #409eff;
+            font-weight: 600;
+            border-bottom-color: #409eff;
+        }
+        
+        .tab-panel {
+            display: none;
+            background: #fff;
+            border-radius: 0 0 8px 8px;
+            box-shadow: 0 2px 12px rgba(0,0,0,0.08);
+            padding: 25px;
+        }
+        
+        .tab-panel.active {
+            display: block;
+        }
+        
+        .content-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+        }
+        
+        .card {
+            background: #fff;
+            border-radius: 8px;
+            border: 1px solid #e4e7ed;
+            overflow: hidden;
+        }
+        
+        .card-header {
+            padding: 15px 20px;
+            border-bottom: 1px solid #e4e7ed;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            background: #fafafa;
+        }
+        
+        .card-header h2 {
+            font-size: 16px;
+            color: #2c3e50;
+        }
+        
+        .card-body {
+            padding: 20px;
+        }
+        
+        .btn {
+            padding: 8px 16px;
+            border: none;
+            border-radius: 4px;
+            font-size: 14px;
+            cursor: pointer;
+            background: #409eff;
+            color: #fff;
+            transition: all 0.3s;
+        }
+        
+        .btn:hover {
+            background: #66b1ff;
+        }
+        
+        .btn-secondary {
+            background: #909399;
+        }
+        
+        .btn-secondary:hover {
+            background: #a6a9ad;
+        }
+        
+        .btn-danger {
+            background: #f56c6c;
+        }
+        
+        .btn-danger:hover {
+            background: #f78989;
+        }
+        
+        .btn-success {
+            background: #67c23a;
+        }
+        
+        .btn-success:hover {
+            background: #85ce61;
+        }
+        
+        .btn-small {
+            padding: 5px 10px;
+            font-size: 12px;
+        }
+        
+        .btn-large {
+            padding: 12px 30px;
+            font-size: 16px;
+        }
+        
+        .btn-group {
+            display: flex;
+            gap: 10px;
+        }
+        
+        .list-container {
+            max-height: 400px;
+            overflow-y: auto;
+            border: 1px solid #e4e7ed;
+            border-radius: 4px;
+        }
+        
+        .list-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 15px;
+            border-bottom: 1px solid #f0f0f0;
+            transition: background 0.3s;
+        }
+        
+        .list-item:last-child {
+            border-bottom: none;
+        }
+        
+        .list-item:hover {
+            background: #f5f7fa;
+        }
+        
+        .list-item .name {
+            font-weight: 500;
+            color: #2c3e50;
+        }
+        
+        .list-item .default-badge {
+            background: #67c23a;
+            color: white;
+            padding: 2px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+            margin-left: 10px;
+        }
+        
+        .list-item .actions {
+            display: flex;
+            gap: 8px;
+        }
+        
+        .empty-state {
+            text-align: center;
+            padding: 40px 20px;
+            color: #909399;
+        }
+        
+        .form-group {
+            margin-bottom: 20px;
+        }
+        
+        .form-group label {
+            display: block;
+            margin-bottom: 8px;
+            font-size: 14px;
+            color: #606266;
+            font-weight: 500;
+        }
+        
+        .form-group input,
+        .form-group select,
+        .form-group textarea {
+            width: 100%;
+            padding: 10px 12px;
+            border: 1px solid #dcdfe6;
+            border-radius: 4px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        
+        .form-group input:focus,
+        .form-group select:focus,
+        .form-group textarea:focus {
+            outline: none;
+            border-color: #409eff;
+        }
+        
+        .form-group textarea {
+            min-height: 200px;
+            font-family: 'Consolas', 'Monaco', monospace;
+            resize: vertical;
+        }
+        
+        /* Schema/Prompt/Corpus 模态框中的 textarea 使用更大高度 */
+        #modalSchemaContent,
+        #modalPromptContent,
+        #modalCorpusContent {
+            min-height: 400px;
+        }
+        
+        .form-row {
+            display: flex;
+            gap: 15px;
+            align-items: flex-end;
+        }
+        
+        .form-row .form-group {
+            flex: 1;
+            margin-bottom: 0;
+        }
+        
+        .config-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 30px;
+            margin-top: 24px;
+            padding-top: 24px;
+            border-top: 1px solid #e4e7ed;
+        }
+        
+        .config-section {
+            background: #fafbfc;
+            padding: 20px;
+            border-radius: 8px;
+            border: 1px solid #e4e7ed;
+        }
+        
+        .config-section h3 {
+            font-size: 16px;
+            color: #2c3e50;
+            margin-bottom: 15px;
+            padding-bottom: 10px;
+            border-bottom: 2px solid #409eff;
+        }
+        
+        .hint {
+            font-size: 12px;
+            color: #909399;
+            margin-top: 5px;
+        }
+        
+        .config-grid-prompt-only {
+            grid-template-columns: 1fr;
+        }
+        
+        .prompt-style-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            align-items: start;
+        }
+        
+        @media (max-width: 900px) {
+            .prompt-style-grid {
+                grid-template-columns: 1fr;
+            }
+        }
+        
+        .prompt-style-col label {
+            display: block;
+            margin-bottom: 6px;
+            font-size: 14px;
+            color: #606266;
+        }
+        
+        /* Prompt 风格下拉：统一为自定义外观，与页面主色协调 */
+        .prompt-style-col-dropdown {
+            background: linear-gradient(165deg, #ffffff 0%, #f8f9fc 100%);
+            border: 1px solid #e8eaef;
+            border-radius: 12px;
+            padding: 14px 16px 16px;
+            box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+        }
+        
+        .prompt-style-col-dropdown > label {
+            margin-bottom: 10px;
+            font-weight: 600;
+            color: #303133;
+            letter-spacing: 0.02em;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        
+        .prompt-style-col-dropdown > label::before {
+            content: '';
+            width: 3px;
+            height: 14px;
+            border-radius: 2px;
+            background: linear-gradient(180deg, #667eea 0%, #409eff 100%);
+            flex-shrink: 0;
+        }
+        
+        .select-prompt-wrap {
+            position: relative;
+            display: block;
+        }
+        
+        .select-prompt-wrap::after {
+            content: '';
+            position: absolute;
+            right: 14px;
+            top: 50%;
+            transform: translateY(-50%);
+            width: 18px;
+            height: 18px;
+            pointer-events: none;
+            background: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='20' height='20' viewBox='0 0 24 24' fill='none'%3E%3Cpath d='M7 10l5 5 5-5' stroke='%23667eea' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E") center / contain no-repeat;
+            opacity: 0.9;
+        }
+        
+        select.select-prompt {
+            appearance: none;
+            -webkit-appearance: none;
+            -moz-appearance: none;
+            width: 100%;
+            margin: 0;
+            padding: 12px 44px 12px 14px;
+            font-size: 13px;
+            line-height: 1.5;
+            color: #303133;
+            background: #fff;
+            border: 1px solid #dcdfe6;
+            border-radius: 8px;
+            box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.8), 0 1px 2px rgba(0, 0, 0, 0.03);
+            cursor: pointer;
+            transition: border-color 0.2s ease, box-shadow 0.2s ease, background 0.2s ease;
+        }
+        
+        select.select-prompt:hover {
+            border-color: #b3d8ff;
+            background: #fbfcff;
+            box-shadow: inset 0 1px 2px rgba(255, 255, 255, 0.9), 0 2px 8px rgba(102, 126, 234, 0.12);
+        }
+        
+        select.select-prompt:focus {
+            outline: none;
+            border-color: #409eff;
+            background: #fff;
+            box-shadow: 0 0 0 3px rgba(64, 158, 255, 0.18), 0 2px 10px rgba(102, 126, 234, 0.1);
+        }
+        
+        select.select-prompt option {
+            padding: 10px;
+            font-size: 13px;
+            color: #303133;
+            background: #fff;
+        }
+        
+        .prompt-custom-textarea {
+            min-height: 160px;
+            font-family: ui-monospace, 'SF Mono', Menlo, Consolas, monospace;
+            font-size: 12px;
+        }
+
+        /* 让左右两列的 label 高度一致，从而避免 textarea 出现“一高一低” */
+        .prompt-custom-label {
+            min-height: 110px;
+            display: block;
+        }
+        
+        .form-actions {
+            display: flex;
+            gap: 10px;
+            justify-content: flex-end;
+            margin-top: 20px;
+            padding-top: 15px;
+            border-top: 1px solid #e4e7ed;
+        }
+        
+        .actions-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 15px;
+            padding: 20px 0;
+            margin-top: 20px;
+            border-top: 1px solid #e4e7ed;
+        }
+        
+        .actions-buttons {
+            display: flex;
+            align-items: center;
+            gap: 15px;
+        }
+        
+        .session-info {
+            background: #f5f7fa;
+            padding: 12px 16px;
+            border-radius: 4px;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        
+        .session-info .label {
+            color: #909399;
+            font-size: 13px;
+        }
+        
+        .session-info .value {
+            font-family: 'Consolas', 'Monaco', monospace;
+            color: #2c3e50;
+            background: #fff;
+            padding: 4px 8px;
+            border-radius: 3px;
+            font-size: 12px;
+        }
+        
+        .message {
+            position: fixed;
+            top: 80px;
+            right: 20px;
+            padding: 12px 20px;
+            border-radius: 4px;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.15);
+            z-index: 1000;
+            display: none;
+        }
+        
+        .message.show {
+            display: block;
+        }
+        
+        .message.success {
+            background: #67c23a;
+            color: #fff;
+        }
+        
+        .message.error {
+            background: #f56c6c;
+            color: #fff;
+        }
+        
+        /* 模态框样式 */
+        .modal {
+            display: none;
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0, 0, 0, 0.5);
+            z-index: 2000;
+            align-items: center;
+            justify-content: center;
+        }
+        
+        .modal.show {
+            display: flex;
+        }
+        
+        .modal-content {
+            background: white;
+            padding: 25px;
+            border-radius: 8px;
+            max-width: 900px;
+            width: 90%;
+            max-height: 85vh;
+            overflow: hidden;
+            box-shadow: 0 10px 40px rgba(0,0,0,0.2);
+            display: flex;
+            flex-direction: column;
+        }
+        
+        .modal-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 1px solid #e4e7ed;
+        }
+        
+        .modal-header h3 {
+            margin: 0;
+            font-size: 18px;
+            color: #2c3e50;
+        }
+        
+        .close-btn {
+            background: none;
+            border: none;
+            font-size: 24px;
+            cursor: pointer;
+            color: #909399;
+            line-height: 1;
+        }
+        
+        .close-btn:hover {
+            color: #606266;
+        }
+        
+        /* Corpus 预览样式 */
+        .corpus-preview {
+            flex: 1;
+            min-height: 200px;
+            max-height: 60vh;
+            overflow-y: auto;
+            border: 1px solid #e4e7ed;
+            border-radius: 4px;
+            padding: 15px;
+            background: #fafafa;
+        }
+        
+        .corpus-item {
+            background: #fff;
+            border: 1px solid #e4e7ed;
+            border-radius: 6px;
+            margin-bottom: 15px;
+            overflow: hidden;
+        }
+        
+        .corpus-item:last-child {
+            margin-bottom: 0;
+        }
+        
+        .corpus-item-header {
+            padding: 12px 15px;
+            font-weight: 700;
+            font-size: 15px;
+            color: #2c3e50;
+            border-bottom: 1px solid #e4e7ed;
+        }
+        
+        .corpus-item-body {
+            padding: 15px;
+            line-height: 1.8;
+            color: #2c3e50;
+            font-size: 14px;
+        }
+
+        /* Corpus 文件夹树形结构 */
+        .corpus-folder {
+            border: 1px solid #e4e7ed;
+            border-radius: 6px;
+            margin-bottom: 12px;
+            overflow: hidden;
+        }
+        .corpus-folder-header {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 10px 15px;
+            background: #f5f7fa;
+            cursor: pointer;
+            transition: background 0.2s;
+        }
+        .corpus-folder-header:hover {
+            background: #ebeef5;
+        }
+        .corpus-folder-header .folder-title {
+            font-weight: 600;
+            color: #2c3e50;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        .corpus-folder-header .folder-title .arrow {
+            display: inline-block;
+            width: 0;
+            height: 0;
+            border-left: 5px solid transparent;
+            border-right: 5px solid transparent;
+            border-top: 6px solid #606266;
+            transition: transform 0.2s;
+        }
+        .corpus-folder-header .folder-title .arrow.collapsed {
+            transform: rotate(-90deg);
+        }
+        .corpus-folder-children {
+            padding: 8px 15px 8px 35px;
+            background: #fff;
+        }
+        .corpus-folder-children.hidden {
+            display: none;
+        }
+        .folder-search-bar {
+            padding: 6px 0 10px 0;
+            margin-bottom: 4px;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .folder-search-input {
+            width: 100%;
+            padding: 6px 10px;
+            border: 1px solid #dcdfe6;
+            border-radius: 4px;
+            font-size: 13px;
+            box-sizing: border-box;
+        }
+        .folder-search-input:focus {
+            outline: none;
+            border-color: #409eff;
+        }
+        .folder-no-results {
+            padding: 12px 0;
+            color: #909399;
+            font-size: 13px;
+            text-align: center;
+        }
+        .corpus-item-row {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 8px 0;
+            border-bottom: 1px solid #f0f0f0;
+        }
+        .corpus-item-row:last-child {
+            border-bottom: none;
+        }
+        .corpus-item-row .name {
+            color: #2c3e50;
+            font-size: 14px;
+            word-break: break-all;
+            flex: 1;
+            padding-right: 10px;
+        }
+        .corpus-item-row .actions {
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .corpus-direct-item {
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            padding: 12px 15px;
+            border-bottom: 1px solid #f0f0f0;
+            transition: background 0.3s;
+        }
+        .corpus-direct-item:last-child {
+            border-bottom: none;
+        }
+        .corpus-direct-item:hover {
+            background: #f5f7fa;
+        }
+        .corpus-direct-item .name {
+            color: #2c3e50;
+            font-size: 14px;
+            word-break: break-all;
+            flex: 1;
+            padding-right: 10px;
+        }
+        .corpus-direct-item .actions {
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .folder-actions {
+            display: flex;
+            gap: 6px;
+            flex-shrink: 0;
+        }
+        .btn-folder {
+            padding: 3px 10px;
+            font-size: 12px;
+            border-radius: 4px;
+            border: 1px solid #dcdfe6;
+            background: #fff;
+            color: #606266;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .btn-folder:hover {
+            background: #f5f7fa;
+            border-color: #c0c4cc;
+        }
+        .btn-folder-primary {
+            border-color: #409eff;
+            color: #409eff;
+        }
+        .btn-folder-primary:hover {
+            background: #ecf5ff;
+        }
+        .btn-folder-danger {
+            border-color: #f56c6c;
+            color: #f56c6c;
+        }
+        .btn-folder-danger:hover {
+            background: #fef0f0;
+        }
+
+        /* 图谱质量评估（Markdown 渲染） */
+        .full-width-card {
+            grid-column: 1 / -1;
+        }
+
+        .quality-eval-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 16px;
+            align-items: start;
+        }
+
+        .quality-eval-section h3 {
+            font-size: 14px;
+            color: #2c3e50;
+            margin: 0 0 10px 0;
+            padding-bottom: 8px;
+            border-bottom: 1px solid #ebeef5;
+        }
+
+        .markdown-preview {
+            border: 1px solid #e4e7ed;
+            border-radius: 4px;
+            padding: 15px;
+            background: #fafafa;
+            max-height: 55vh;
+            overflow-y: auto;
+            line-height: 1.8;
+            font-size: 14px;
+            color: #2c3e50;
+        }
+
+        .markdown-preview pre {
+            background: #0b1220;
+            color: #e5e7eb;
+            padding: 12px;
+            border-radius: 6px;
+            overflow-x: auto;
+        }
+
+        .markdown-preview code {
+            font-family: 'Consolas', 'Monaco', 'Courier New', monospace;
+            font-size: 13px;
+        }
+
+        .markdown-preview pre code {
+            background: transparent;
+            padding: 0;
+            border: none;
+        }
+
+        .markdown-preview blockquote {
+            border-left: 4px solid #409eff;
+            margin: 10px 0;
+            padding: 6px 12px;
+            background: #f0f7ff;
+            border-radius: 4px;
+        }
+
+        .markdown-preview table {
+            width: 100%;
+            border-collapse: collapse;
+            overflow-x: auto;
+            display: block;
+        }
+
+        .markdown-preview th,
+        .markdown-preview td {
+            border: 1px solid #e4e7ed;
+            padding: 8px;
+            vertical-align: top;
+        }
+        
+        .view-content {
+            display: none;
+        }
+        
+        .view-content.active {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-height: 0;
+        }
+        
+        .view-content .form-group {
+            display: flex;
+            flex-direction: column;
+            flex: 1;
+            min-height: 0;
+        }
+        
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(255, 255, 255, 0.9);
+            z-index: 3000;
+            display: none;
+            align-items: center;
+            justify-content: center;
+            flex-direction: column;
+        }
+        
+        .loading-overlay.show {
+            display: flex;
+        }
+        
+        .loading-spinner {
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #409eff;
+            border-radius: 50%;
+            width: 50px;
+            height: 50px;
+            animation: spin 1s linear infinite;
+            margin-bottom: 20px;
+        }
+        
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        
+        .loading-text {
+            font-size: 16px;
+            color: #606266;
+        }
+        
+        /* 生成图谱进度条 - 确定性进度 */
+        .loading-progress-wrapper {
+            width: 360px;
+            margin: 20px 0 12px 0;
+        }
+        
+        .loading-progress-bar {
+            height: 10px;
+            background: #e4e7ed;
+            border-radius: 5px;
+            overflow: hidden;
+        }
+        
+        .loading-progress-bar .progress-fill {
+            height: 100%;
+            width: 0%;
+            background: linear-gradient(90deg, #409eff, #66b1ff);
+            border-radius: 5px;
+            transition: width 0.3s ease;
+        }
+        
+        .loading-progress-stats {
+            display: flex;
+            justify-content: space-between;
+            margin-top: 10px;
+            font-size: 14px;
+            color: #606266;
+        }
+        
+        .loading-progress-percent { font-weight: 600; color: #409eff; }
+        .loading-progress-countdown { color: #909399; }
+        
+        .loading-progress-text {
+            font-size: 13px;
+            color: #909399;
+            margin-top: 6px;
+            text-align: center;
+        }
+    </style>
+</head>
+<body>
+    <!-- 导航栏 -->
+    <nav class="navbar">
+        <div class="navbar-content">
+            <a href="index.html" class="navbar-brand">图谱可视化系统</a>
+            <ul class="navbar-nav">
+                <li><a href="index.html" class="nav-link">图谱可视化</a></li>
+                <li><a href="manage.html" class="nav-link active" id="nav-manage-link">图谱管理</a></li>
+                <li><a href="quality-eval.html" class="nav-link" id="nav-quality-eval-link">图谱质量评估</a></li>
+            </ul>
+        </div>
+    </nav>
+
+    <div class="page-wrapper">
+        <div class="page-container">
+            <div class="page-header">
+                <h1>图谱管理</h1>
+            </div>
+            
+            <!-- 主 Tab 导航 -->
+            <div class="main-tabs">
+                <button class="main-tab" data-tab="schema-prompt" onclick="switchMainTab('schema-prompt', event)">Schema/Prompt管理</button>
+                <button class="main-tab active" data-tab="corpus" onclick="switchMainTab('corpus', event)">Corpus管理</button>
+                <button class="main-tab" data-tab="generate" onclick="switchMainTab('generate', event)">生成图谱</button>
+            </div>
+            
+            <!-- Schema/Prompt管理 Tab -->
+            <div id="schema-prompt-panel" class="tab-panel">
+                <div class="content-grid">
+                    <!-- Schema管理 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Schema 管理</h2>
+                            <div class="btn-group">
+                                <button class="btn" onclick="showCreateSchemaFolderModal()">创建文件夹</button>
+                                <button class="btn" onclick="showCreateSchemaModal()">创建Schema</button>
+                                <button class="btn btn-secondary" onclick="loadSchemas()">刷新</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="schemaList" class="list-container">
+                                <div class="empty-state">加载中...</div>
+                            </div>
+                        </div>
+                    </div>
+                    
+                    <!-- Prompt管理 -->
+                    <div class="card">
+                        <div class="card-header">
+                            <h2>Prompt 管理</h2>
+                            <div class="btn-group">
+                                <button class="btn" onclick="showCreatePromptModal()">创建</button>
+                                <button class="btn btn-secondary" onclick="loadPrompts()">刷新</button>
+                            </div>
+                        </div>
+                        <div class="card-body">
+                            <div id="promptList" class="list-container">
+                                <div class="empty-state">加载中...</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Corpus管理 Tab -->
+            <div id="corpus-panel" class="tab-panel active">
+                <div class="card">
+                    <div class="card-header">
+                        <h2>Corpus 列表</h2>
+                        <div class="btn-group">
+                            <button class="btn" onclick="showCreateFolderModal()">新建文件夹</button>
+                            <button class="btn" onclick="showCreateCorpusModal()">创建Corpus</button>
+                            <button class="btn btn-secondary" onclick="loadCorpusList()">刷新</button>
+                        </div>
+                    </div>
+                    <div class="card-body">
+                        <div id="corpusList" class="list-container">
+                            <div class="empty-state">加载中...</div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- 生成图谱 Tab -->
+            <div id="generate-panel" class="tab-panel">
+                <div class="session-info">
+                    <span class="label">当前Session ID:</span>
+                    <span class="value" id="sessionIdDisplay">-</span>
+                    <button class="btn btn-secondary btn-small" onclick="resetSessionId()" style="margin-left: auto;">重置Session</button>
+                </div>
+                
+                <div class="form-group">
+                    <label>数据集名称:</label>
+                    <div class="form-row">
+                        <div class="form-group">
+                            <select id="generateDatasetName">
+                                <option value="">请选择数据集</option>
+                            </select>
+                        </div>
+                        <button class="btn btn-secondary" onclick="loadCorpusOptions()">刷新</button>
+                    </div>
+                </div>
+                
+                <div class="config-grid">
+                    <div class="config-section">
+                        <h3>Schema配置（可多选）</h3>
+                        <div class="form-group">
+                            <label>选择Schema文件夹:</label>
+                            <select id="generateSchemaFolder" onchange="onSchemaFolderChange()">
+                                <option value="">根目录</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>选择Schema文件（可多选）:</label>
+                            <div id="generateSchemaList" style="max-height: 150px; overflow-y: auto; border: 1px solid #dcdfe6; border-radius: 4px; padding: 8px;">
+                                <div style="color: #909399; font-size: 13px;">请先选择文件夹</div>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="config-section">
+                        <h3>Prompt配置</h3>
+                        <div class="form-group">
+                            <label>Prompt来源:</label>
+                            <select id="generatePromptType" onchange="onPromptTypeChange()">
+                                <option value="">不使用</option>
+                                <option value="folder">使用Prompt文件夹（全跑）</option>
+                                <option value="file">使用单个Prompt文件</option>
+                            </select>
+                        </div>
+                        <div id="promptFolderSection" class="form-group" style="display: none;">
+                            <label>选择Prompt文件夹:</label>
+                            <select id="generatePromptFolder">
+                                <option value="">请选择</option>
+                            </select>
+                            <div style="margin-top: 8px; padding: 8px; background: #e6f7ff; border-radius: 4px; color: #1890ff; font-size: 12px;">
+                                将自动使用该文件夹内的所有stage文件（stage1/2/3/4）
+                            </div>
+                        </div>
+                        <div id="promptFileSection" class="form-group" style="display: none;">
+                            <label>选择Prompt文件:</label>
+                            <select id="generatePromptFile">
+                                <option value="">请选择</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="config-grid config-grid-prompt-only">
+                    <div class="config-section">
+                        <h3>风格配置</h3>
+                        <div class="prompt-style-grid">
+                            <div class="prompt-style-col prompt-style-col-dropdown">
+                                <label for="stage1StyleSelect">实体识别风格</label>
+                                <div class="select-prompt-wrap">
+                                    <select id="stage1StyleSelect" class="select-prompt">
+                                    <option value="">加载中…</option>
+                                    </select>
+                                </div>
+                            </div>
+                            <div class="prompt-style-col prompt-style-col-dropdown">
+                                <label for="stage2StyleSelect">关系抽取风格</label>
+                                <div class="select-prompt-wrap">
+                                    <select id="stage2StyleSelect" class="select-prompt">
+                                    <option value="">加载中…</option>
+                                    </select>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="form-group" style="margin-top: 18px;">
+                            <label>用户自定义图谱生成风格修改：</label>
+                            <div class="prompt-style-grid" style="margin-top: 8px;">
+                                <div class="prompt-style-col">
+                                    <textarea id="stage1ExamplesOverride" class="prompt-custom-textarea" placeholder='结构与 stage1_example.json 中某一风格值一致，如 {"input":"...","output":{...}}'></textarea>
+                                    <label for="stage1ExamplesOverride" class="prompt-custom-label">自定义风格示例，告诉系统你希望如何抽取实体：<br>- 写一段文本<br>- 标出你希望抽出的实体<br>- 给出标准名称（canonical_name）<br>- 可包含缩写映射</label>
+                                    <div style="margin-top: 8px; display: flex; justify-content: flex-end;">
+                                        <button class="btn btn-secondary btn-small" type="button" onclick="fillStage1Example()">Stage1 示例填充</button>
+                                    </div>
+                                </div>
+                                <div class="prompt-style-col">
+                                    <textarea id="stage2ExamplesOverride" class="prompt-custom-textarea" placeholder='结构与 stage2_example.json 中某一风格值一致'></textarea>
+                                    <label for="stage2ExamplesOverride" class="prompt-custom-label">自定义风格示例，告诉系统你希望如何连接关系：<br>- 写一段文本<br>- 给出你希望的三元组（subject, relation, object）<br>- 注意关系方向（谁作用于谁）</label>
+                                    <div style="margin-top: 8px; display: flex; justify-content: flex-end;">
+                                        <button class="btn btn-secondary btn-small" type="button" onclick="fillStage2Example()">Stage2 示例填充</button>
+                                    </div>
+                                </div>
+                            </div>
+                            <div class="hint" style="margin-top: 10px;">若填写了自定义 JSON 且解析成功，将覆盖上方对应风格；留空则仅使用上方下拉。须为合法 JSON。</div>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="form-group" style="margin-top: 20px; padding: 15px; background: #f5f7fa; border-radius: 8px;">
+                    <div style="display: flex; align-items: center; gap: 30px; flex-wrap: wrap;">
+                        <label style="display: flex; align-items: center; gap: 8px; margin: 0;">
+                            <span>输出命名（可选）:</span>
+                            <input type="text" id="outputName" placeholder="例如：my_graph_v1" style="width: 200px;">
+                        </label>
+                        <div style="display: flex; align-items: center; gap: 6px; margin: 0;">
+                            <span style="white-space: nowrap;">输出模式:</span>
+                            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; margin: 0; white-space: nowrap;">
+                                <input type="radio" name="outputMode" value="full" style="width: auto;">
+                                <span>完整</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; margin: 0; white-space: nowrap;">
+                                <input type="radio" name="outputMode" value="balanced" checked style="width: auto;">
+                                <span>均衡</span>
+                            </label>
+                            <label style="display: flex; align-items: center; gap: 4px; cursor: pointer; margin: 0; white-space: nowrap;">
+                                <input type="radio" name="outputMode" value="simple" style="width: auto;">
+                                <span>精简</span>
+                            </label>
+                            <span style="color: #888; font-size: 12px; margin-left: 4px;" id="outputModeHint">不损失图谱质量，跳过后处理分析</span>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="actions-container">
+                    <div class="actions-buttons">
+                        <button class="btn btn-success btn-large" id="generateGraphBtn" onclick="generateGraph()">生成图谱</button>
+                        <button class="btn btn-secondary btn-large" id="cancelGenerateBtn" style="display:none;" onclick="cancelGenerate()">取消</button>
+                    </div>
+                    <div class="loading-progress-wrapper" id="generateProgressWrapper" style="display:none; width:100%; max-width:400px; margin:0 auto;">
+                        <div class="loading-progress-bar">
+                            <div class="progress-fill" id="progressFill"></div>
+                        </div>
+                        <div class="loading-progress-stats">
+                            <span class="loading-progress-percent" id="progressPercent">0%</span>
+                            <span class="loading-progress-countdown" id="progressCountdown">剩余 30:00</span>
+                        </div>
+                        <div class="loading-progress-text" id="generateProgressHint">正在生成图谱，预计最长需 30 分钟，可以切换页面，进度不会丢失</div>
+                        <div id="progressTimeoutActions" style="display:none; margin-top:12px; text-align:center;">
+                            <div class="loading-progress-text" style="margin-bottom:8px;">生成超时，若后端仍在运行请等待，或关闭后刷新页面</div>
+                            <button class="btn btn-secondary btn-small" onclick="closeLoadingOverlay()">关闭</button>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="message" id="message"></div>
+
+    <!-- 图谱生成完成模态弹窗 -->
+    <div id="generateCompleteModal" class="modal">
+        <div class="modal-content" style="max-width: 480px;">
+            <div class="modal-header" style="border-bottom: none; margin-bottom: 10px; padding-bottom: 0;">
+                <h3 style="color: #67c23a; font-size: 20px;">图谱生成完成</h3>
+            </div>
+            <div style="text-align: center; padding: 10px 0 20px;">
+                <div style="font-size: 48px; margin-bottom: 12px;">&#10004;</div>
+                <p id="generateCompleteInfo" style="color: #606266; font-size: 14px; line-height: 1.6; margin: 0;"></p>
+            </div>
+            <div style="display: flex; gap: 12px; justify-content: center; padding-top: 10px; border-top: 1px solid #e4e7ed;">
+                <button class="btn btn-secondary" onclick="closeGenerateCompleteModal()" style="min-width: 120px;">留在当前页</button>
+                <button class="btn btn-success" onclick="goToVisualization()" style="min-width: 120px;">跳转可视化页面</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Schema编辑模态框 -->
+    <div id="schemaModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="schemaModalTitle">创建Schema</h3>
+                <button class="close-btn" onclick="closeSchemaModal()">&times;</button>
+            </div>
+            <div class="form-group">
+                <label>所属文件夹:</label>
+                <select id="modalSchemaFolder">
+                    <option value="">根目录</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Schema名称:</label>
+                <input type="text" id="modalSchemaName" placeholder="输入schema名称">
+            </div>
+            <div class="form-group">
+                <label>Schema内容 (JSON格式):</label>
+                <textarea id="modalSchemaContent" placeholder='{"Nodes": [...], "Relations": [...]}'></textarea>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="closeSchemaModal()">取消</button>
+                <button class="btn" id="schemaSaveBtn" onclick="saveSchema()">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Schema文件夹创建模态框 -->
+    <div id="schemaFolderModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>创建Schema文件夹</h3>
+                <button class="close-btn" onclick="closeSchemaFolderModal()">&times;</button>
+            </div>
+            <div class="form-group">
+                <label>文件夹名称:</label>
+                <input type="text" id="modalSchemaFolderName" placeholder="输入文件夹名称">
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="closeSchemaFolderModal()">取消</button>
+                <button class="btn" onclick="saveSchemaFolder()">创建</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Prompt编辑模态框 -->
+    <div id="promptModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="promptModalTitle">创建Prompt</h3>
+                <button class="close-btn" onclick="closePromptModal()">&times;</button>
+            </div>
+            <div class="form-group">
+                <label>Prompt名称:</label>
+                <input type="text" id="modalPromptName" placeholder="输入prompt名称">
+            </div>
+            <div class="form-group">
+                <label>Prompt内容:</label>
+                <textarea id="modalPromptContent" placeholder="输入prompt内容..."></textarea>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="closePromptModal()">取消</button>
+                <button class="btn" id="promptSaveBtn" onclick="savePrompt()">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- Staged Prompt 文件夹创建模态框 -->
+    <div id="stagedFolderModal" class="modal">
+        <div class="modal-content" style="max-width: 600px;">
+            <div class="modal-header">
+                <h3>创建分阶段 Prompt 文件夹</h3>
+                <button class="close-btn" onclick="closeStagedFolderModal()">&times;</button>
+            </div>
+            <div class="form-group">
+                <label>文件夹名称:</label>
+                <input type="text" id="newStagedFolderName" placeholder="输入新文件夹名称">
+            </div>
+            <div class="form-group">
+                <label>初始化方式:</label>
+                <select id="stagedFolderInitMode" onchange="toggleSourceFolderSelect()">
+                    <option value="copy">从已有文件夹复制（推荐）</option>
+                    <option value="empty">创建空文件夹</option>
+                </select>
+            </div>
+            <div class="form-group" id="sourceFolderGroup">
+                <label>选择源文件夹:</label>
+                <select id="stagedFolderSource"></select>
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="closeStagedFolderModal()">取消</button>
+                <button class="btn" onclick="createStagedFolder()">创建</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Corpus编辑模态框 -->
+    <div id="corpusModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="corpusModalTitle">创建Corpus</h3>
+                <button class="close-btn" onclick="closeCorpusModal()">&times;</button>
+            </div>
+            <input type="hidden" id="modalCorpusParentPath" value="">
+            <div class="form-group">
+                <label>父文件夹:</label>
+                <select id="modalCorpusParentSelect" onchange="onCorpusParentChange()">
+                    <option value="">根目录 (input/)</option>
+                </select>
+            </div>
+            <div class="form-group">
+                <label>Corpus名称:</label>
+                <input type="text" id="modalCorpusName" placeholder="输入corpus名称">
+            </div>
+            
+            <!-- 预览视图 -->
+            <div id="previewView" class="view-content">
+                <div class="form-group">
+                    <label>Corpus内容:</label>
+                    <div id="corpusPreview" class="corpus-preview">
+                        <div class="empty-state">暂无内容</div>
+                    </div>
+                </div>
+            </div>
+            
+            <!-- JSON编辑视图 -->
+            <div id="jsonView" class="view-content active">
+                <div class="form-group" style="margin-bottom: 0;">
+                    <label>Corpus内容 (JSON格式):</label>
+                    <textarea id="modalCorpusContent" placeholder='[{"title": "标题1", "text": "内容1"}]'></textarea>
+                    <div class="hint">格式要求：JSON数组，每个元素包含title和text字段</div>
+                </div>
+            </div>
+            
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="closeCorpusModal()">取消</button>
+                <button class="btn" id="corpusSaveBtn" onclick="saveCorpus()">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 文件夹创建模态框 -->
+    <div id="folderModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3 id="folderModalTitle">新建文件夹</h3>
+                <button class="close-btn" onclick="closeFolderModal()">&times;</button>
+            </div>
+            <input type="hidden" id="modalFolderParentPath" value="">
+            <div class="form-group">
+                <label>文件夹名称:</label>
+                <input type="text" id="modalFolderName" placeholder="输入文件夹名称">
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="closeFolderModal()">取消</button>
+                <button class="btn" onclick="saveFolder()">创建</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 文件夹重命名模态框 -->
+    <div id="renameFolderModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h3>重命名文件夹</h3>
+                <button class="close-btn" onclick="closeRenameFolderModal()">&times;</button>
+            </div>
+            <input type="hidden" id="modalRenameFolderPath" value="">
+            <input type="hidden" id="modalRenameFolderOldName" value="">
+            <div class="form-group">
+                <label>原名称:</label>
+                <input type="text" id="modalRenameFolderOldNameDisplay" disabled style="background:#f5f7fa;color:#909399;">
+            </div>
+            <div class="form-group">
+                <label>新名称:</label>
+                <input type="text" id="modalRenameFolderNewName" placeholder="输入新名称">
+            </div>
+            <div class="form-actions">
+                <button class="btn btn-secondary" onclick="closeRenameFolderModal()">取消</button>
+                <button class="btn" onclick="saveRenameFolder()">保存</button>
+            </div>
+        </div>
+    </div>
+    
+    <!-- 加载遮罩（生成图谱时不再使用，进度条已移至按钮下方） -->
+    <div class="loading-overlay" id="loadingOverlay" style="display:none;">
+    
+    <script>
+        const API_BASE = '';
+        
+        // 初始化
+        document.addEventListener('DOMContentLoaded', function() {
+            displaySessionId();
+            const hash = (window.location.hash || '').replace('#', '');
+            if (hash === 'quality-eval') {
+                // 兼容旧链接：manage.html#quality-eval -> 跳转到独立页面
+                window.location.href = 'quality-eval.html';
+                return;
+            }
+
+            loadCorpusList();
+            loadStageExampleStyles();
+            const navManage = document.getElementById('nav-manage-link');
+            if (navManage) navManage.classList.add('active');
+
+            // 恢复正在进行的生成任务状态
+            recoverGenerationState();
+        });
+        
+        // ==================== Tab 切换 ====================
+        function switchMainTab(tabName, evt) {
+            // 更新按钮状态
+            document.querySelectorAll('.main-tab').forEach(tab => tab.classList.remove('active'));
+            document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
+            
+            // 激活对应的 tab 按钮和面板
+            const targetBtn = evt && evt.target ? evt.target : document.querySelector(`[data-tab="${tabName}"]`);
+            if (targetBtn) targetBtn.classList.add('active');
+            const panel = document.getElementById(tabName + '-panel');
+            if (panel) panel.classList.add('active');
+            
+            // 根据 tab 加载数据
+            if (tabName === 'schema-prompt') {
+                loadSchemas();
+                loadPrompts();
+            } else if (tabName === 'corpus') {
+                loadCorpusList();
+            } else if (tabName === 'generate') {
+                loadCorpusOptions();
+                loadSchemaAndPromptOptions();
+                loadStageExampleStyles();
+            }
+        }
+        
+        // ==================== 工具函数 ====================
+        function showMessage(text, type) {
+            const message = document.getElementById('message');
+            message.textContent = text;
+            message.className = `message ${type} show`;
+            setTimeout(() => {
+                message.classList.remove('show');
+            }, 3000);
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        function escapeHtmlKeepLatex(text) {
+            if (!text) return '';
+            let escaped = text
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+            escaped = escaped.replace(/\n/g, '<br>');
+            return escaped;
+        }
+
+        // 给简单兜底用：只做 HTML 转义，不把换行替换成 <br>
+        function escapeHtmlKeepLatexPreserveNewlines(text) {
+            if (!text) return '';
+            return String(text)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        // 如果 marked 未加载/未工作，则使用简化规则将 Markdown 转成可读 HTML
+        // 主要覆盖：**加粗**、有序列表（1. / 2. ...）、代码块（```...```）
+        function simpleMarkdownToHtml(markdownText) {
+            const raw = String(markdownText || '');
+
+            const codeBlocks = [];
+            let working = raw.replace(/```([\s\S]*?)```/g, function(_m, code) {
+                const idx = codeBlocks.length;
+                codeBlocks.push(code);
+                return `@@CODEBLOCK_${idx}@@`;
+            });
+
+            working = escapeHtmlKeepLatexPreserveNewlines(working);
+
+            working = working.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>');
+
+            const lines = working.split('\n');
+            let html = '';
+            let inOl = false;
+
+            for (let i = 0; i < lines.length; i++) {
+                const line = lines[i];
+                const m = line.match(/^\s*\d+\.\s+(.*)$/);
+                if (m) {
+                    if (!inOl) {
+                        html += '<ol>';
+                        inOl = true;
+                    }
+                    html += `<li>${m[1]}</li>`;
+                } else {
+                    if (inOl) {
+                        html += '</ol>';
+                        inOl = false;
+                    }
+                    if (line.trim() === '') {
+                        html += '<br>';
+                    } else {
+                        html += line + '<br>';
+                    }
+                }
+            }
+
+            if (inOl) html += '</ol>';
+            html = html.replace(/(<br>)+$/g, '');
+
+            html = html.replace(/@@CODEBLOCK_(\d+)@@/g, function(_m, idxStr) {
+                const idx = Number(idxStr);
+                const code = codeBlocks[idx] || '';
+                const escapedCode = escapeHtmlKeepLatexPreserveNewlines(code);
+                return `<pre><code>${escapedCode}</code></pre>`;
+            });
+
+            return html;
+        }
+        
+        function renderLatex(element) {
+            if (typeof renderMathInElement === 'function') {
+                renderMathInElement(element, {
+                    delimiters: [
+                        {left: '$$', right: '$$', display: true},
+                        {left: '$', right: '$', display: false},
+                        {left: '\\[', right: '\\]', display: true},
+                        {left: '\\(', right: '\\)', display: false}
+                    ],
+                    throwOnError: false,
+                    strict: false
+                });
+            }
+        }
+
+        function renderMarkdownToElement(elementId, markdownText) {
+            const el = document.getElementById(elementId);
+            if (!el) return;
+
+            if (!markdownText) {
+                el.innerHTML = '<div class="empty-state" style="padding: 0;">暂无内容</div>';
+                return;
+            }
+
+            try {
+                let html = '';
+
+                if (typeof marked !== 'undefined' && typeof marked.parse === 'function') {
+                    html = marked.parse(String(markdownText), {
+                        gfm: true,
+                        breaks: true
+                    });
+                } else {
+                    // marked 兜底：将 Markdown 的关键结构转成可读 HTML
+                    html = simpleMarkdownToHtml(String(markdownText));
+                }
+
+                if (typeof DOMPurify !== 'undefined' && typeof DOMPurify.sanitize === 'function') {
+                    html = DOMPurify.sanitize(html);
+                }
+
+                el.innerHTML = html;
+                renderLatex(el);
+            } catch (e) {
+                el.innerHTML = '<div class="empty-state" style="padding: 0;">Markdown 渲染失败</div>';
+            }
+        }
+
+        async function loadStage4Prompts() {
+            const nodeEl = document.getElementById('stage4NodeAccuracyPrompt');
+            const tripleEl = document.getElementById('stage4TripleSupportPrompt');
+            if (nodeEl) nodeEl.innerHTML = '<div class="empty-state" style="padding: 0;">加载中...</div>';
+            if (tripleEl) tripleEl.innerHTML = '<div class="empty-state" style="padding: 0;">加载中...</div>';
+
+            try {
+                const response = await axios.get(`${API_BASE}/api/stage4-prompts`);
+                const data = response.data || {};
+
+                renderMarkdownToElement('stage4NodeAccuracyPrompt', data.stage4_node_accuracy);
+                renderMarkdownToElement('stage4TripleSupportPrompt', data.stage4_triple_support);
+            } catch (error) {
+                showMessage('加载图谱质量评估提示词失败', 'error');
+                if (nodeEl) nodeEl.innerHTML = '<div class="empty-state" style="padding: 0;">加载失败</div>';
+                if (tripleEl) tripleEl.innerHTML = '<div class="empty-state" style="padding: 0;">加载失败</div>';
+            }
+        }
+        
+        let progressTimerId = null;
+        const PROGRESS_MAX_SECONDS = 30 * 60; // 30 分钟
+        
+        function formatCountdown(seconds) {
+            const m = Math.floor(seconds / 60);
+            const s = seconds % 60;
+            return `${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
+        }
+        
+        function updateProgressUI(percent, countdownText) {
+            const fill = document.getElementById('progressFill');
+            const percentEl = document.getElementById('progressPercent');
+            const countdownEl = document.getElementById('progressCountdown');
+            if (fill) fill.style.width = percent + '%';
+            if (percentEl) percentEl.textContent = Math.round(percent) + '%';
+            if (countdownEl) countdownEl.textContent = countdownText;
+        }
+        
+        function startGenerateProgress() {
+            if (progressTimerId) clearInterval(progressTimerId);
+            const timeoutActions = document.getElementById('progressTimeoutActions');
+            if (timeoutActions) timeoutActions.style.display = 'none';
+            updateProgressUI(0, '剩余 30:00');
+            const wrapper = document.getElementById('generateProgressWrapper');
+            if (wrapper) wrapper.style.display = 'block';
+            const btn = document.getElementById('generateGraphBtn');
+            if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+            const cancelBtn = document.getElementById('cancelGenerateBtn');
+            if (cancelBtn) cancelBtn.style.display = 'inline-block';
+            
+            let elapsed = 0;
+            progressTimerId = setInterval(function() {
+                elapsed++;
+                const progress = Math.min(99, (elapsed / PROGRESS_MAX_SECONDS) * 99);
+                const remaining = Math.max(0, PROGRESS_MAX_SECONDS - elapsed);
+                updateProgressUI(progress, remaining > 0 ? '剩余 ' + formatCountdown(remaining) : '已超时');
+                
+                if (elapsed >= PROGRESS_MAX_SECONDS) {
+                    clearInterval(progressTimerId);
+                    progressTimerId = null;
+                    const timeoutActions = document.getElementById('progressTimeoutActions');
+                    if (timeoutActions) timeoutActions.style.display = 'block';
+                }
+            }, 1000);
+        }
+        
+        function stopGenerateProgress(success) {
+            if (progressTimerId) {
+                clearInterval(progressTimerId);
+                progressTimerId = null;
+            }
+            if (success) {
+                updateProgressUI(100, '完成!');
+            }
+        }
+        
+        function closeLoadingOverlay() {
+            if (progressTimerId) {
+                clearInterval(progressTimerId);
+                progressTimerId = null;
+            }
+            hideGenerateProgress();
+        }
+        
+        function showLoading(show) {
+            if (!show) hideGenerateProgress();
+        }
+        
+        function hideGenerateProgress() {
+            const wrapper = document.getElementById('generateProgressWrapper');
+            if (wrapper) wrapper.style.display = 'none';
+            const btn = document.getElementById('generateGraphBtn');
+            if (btn) { btn.disabled = false; btn.style.opacity = '1'; }
+            const cancelBtn = document.getElementById('cancelGenerateBtn');
+            if (cancelBtn) cancelBtn.style.display = 'none';
+            const timeoutActions = document.getElementById('progressTimeoutActions');
+            if (timeoutActions) timeoutActions.style.display = 'none';
+        }
+        
+        async function cancelGenerate() {
+            // 停止前端轮询和进度条
+            stopPolling();
+            closeLoadingOverlay();
+
+            // 通知后端取消任务
+            const sessionId = getOrCreateSessionId();
+            try {
+                await axios.post(`${API_BASE}/api/cancel_generation`, { session_id: sessionId });
+            } catch (e) {
+                console.warn('取消请求失败:', e.message);
+            }
+            showMessage('已取消生成', 'success');
+        }
+
+                // ==================== 生成状态轮询 ====================
+        let pollingTimerId = null;
+        let pollingSessionId = null;
+        const POLL_INTERVAL = 5000; // 5秒轮询一次
+
+        function startPolling(sessionId) {
+            stopPolling();
+            pollingSessionId = sessionId;
+            localStorage.setItem('generating_session_id', sessionId);
+            pollingTimerId = setInterval(function() {
+                checkGenerationStatus(sessionId);
+            }, POLL_INTERVAL);
+        }
+
+        function stopPolling() {
+            if (pollingTimerId) {
+                clearInterval(pollingTimerId);
+                pollingTimerId = null;
+            }
+            pollingSessionId = null;
+            localStorage.removeItem('generating_session_id');
+        }
+
+        async function checkGenerationStatus(sessionId) {
+            try {
+                const response = await axios.get(`${API_BASE}/api/generation_status/${sessionId}`);
+                const data = response.data;
+
+                if (data.status === 'completed') {
+                    stopPolling();
+                    stopGenerateProgress(true);
+                    hideGenerateProgress();
+
+                    const filesInfo = (data.graph_files || []).join(', ') || '生成完成';
+                    const datasetLabel = data.dataset_name || localStorage.getItem('generating_dataset') || '未知';
+                    document.getElementById('generateCompleteInfo').innerHTML =
+                        '数据集: <strong>' + datasetLabel + '</strong><br>' +
+                        '生成文件: ' + filesInfo;
+                    window._generateCompleteDataset = datasetLabel;
+                    window._generateCompleteTimestamp = data.time_now || '';
+                    document.getElementById('generateCompleteModal').classList.add('show');
+                    localStorage.removeItem('generating_dataset');
+                    showMessage('图谱生成完成！', 'success');
+
+                } else if (data.status === 'failed') {
+                    stopPolling();
+                    stopGenerateProgress(false);
+                    hideGenerateProgress();
+                    localStorage.removeItem('generating_dataset');
+                    const errMsg = data.error || '未知错误';
+                    showMessage('生成失败: ' + errMsg.substring(0, 200), 'error');
+
+                } else if (data.status === 'running') {
+                    if (data.elapsed_seconds) {
+                        const elapsed = data.elapsed_seconds;
+                        const progress = Math.min(99, (elapsed / PROGRESS_MAX_SECONDS) * 99);
+                        const remaining = Math.max(0, PROGRESS_MAX_SECONDS - elapsed);
+                        updateProgressUI(progress, remaining > 0 ? '剩余 ' + formatCountdown(remaining) : '已超时');
+                    }
+
+                } else if (data.status === 'not_found') {
+                    stopPolling();
+                    stopGenerateProgress(false);
+                    hideGenerateProgress();
+                    localStorage.removeItem('generating_dataset');
+                }
+            } catch (error) {
+                console.warn('轮询生成状态失败:', error.message);
+            }
+        }
+
+        async function recoverGenerationState() {
+            const generatingSessionId = localStorage.getItem('generating_session_id');
+            if (!generatingSessionId) return;
+
+            try {
+                const response = await axios.get(`${API_BASE}/api/generation_status/${generatingSessionId}`);
+                const data = response.data;
+
+                if (data.status === 'running') {
+                    const elapsed = data.elapsed_seconds || 0;
+                    const progress = Math.min(99, (elapsed / PROGRESS_MAX_SECONDS) * 99);
+                    const remaining = Math.max(0, PROGRESS_MAX_SECONDS - elapsed);
+
+                    const wrapper = document.getElementById('generateProgressWrapper');
+                    if (wrapper) wrapper.style.display = 'block';
+                    const btn = document.getElementById('generateGraphBtn');
+                    if (btn) { btn.disabled = true; btn.style.opacity = '0.6'; }
+                    const cancelBtn = document.getElementById('cancelGenerateBtn');
+                    if (cancelBtn) cancelBtn.style.display = 'inline-block';
+                    const hint = document.getElementById('generateProgressHint');
+                    if (hint) hint.textContent = '正在生成图谱（已恢复状态），请耐心等待';
+
+                    updateProgressUI(progress, remaining > 0 ? '剩余 ' + formatCountdown(remaining) : '已超时');
+
+                    if (progressTimerId) clearInterval(progressTimerId);
+                    let localElapsed = elapsed;
+                    progressTimerId = setInterval(function() {
+                        localElapsed++;
+                        const p = Math.min(99, (localElapsed / PROGRESS_MAX_SECONDS) * 99);
+                        const r = Math.max(0, PROGRESS_MAX_SECONDS - localElapsed);
+                        updateProgressUI(p, r > 0 ? '剩余 ' + formatCountdown(r) : '已超时');
+                        if (localElapsed >= PROGRESS_MAX_SECONDS) {
+                            clearInterval(progressTimerId);
+                            progressTimerId = null;
+                            const timeoutActions = document.getElementById('progressTimeoutActions');
+                            if (timeoutActions) timeoutActions.style.display = 'block';
+                        }
+                    }, 1000);
+
+                    startPolling(generatingSessionId);
+                    switchMainTab('generate');
+
+                } else if (data.status === 'completed') {
+                    localStorage.removeItem('generating_session_id');
+                    const filesInfo = (data.graph_files || []).join(', ') || '生成完成';
+                    const datasetLabel = data.dataset_name || localStorage.getItem('generating_dataset') || '未知';
+                    document.getElementById('generateCompleteInfo').innerHTML =
+                        '数据集: <strong>' + datasetLabel + '</strong><br>' +
+                        '生成文件: ' + filesInfo;
+                    window._generateCompleteDataset = datasetLabel;
+                    window._generateCompleteTimestamp = data.time_now || '';
+                    document.getElementById('generateCompleteModal').classList.add('show');
+                    localStorage.removeItem('generating_dataset');
+
+                } else if (data.status === 'failed') {
+                    localStorage.removeItem('generating_session_id');
+                    localStorage.removeItem('generating_dataset');
+                    const errMsg = data.error || '未知错误';
+                    showMessage('之前的图谱生成失败: ' + errMsg.substring(0, 200), 'error');
+
+                } else {
+                    localStorage.removeItem('generating_session_id');
+                    localStorage.removeItem('generating_dataset');
+                }
+            } catch (error) {
+                console.warn('恢复生成状态失败:', error.message);
+                localStorage.removeItem('generating_session_id');
+                localStorage.removeItem('generating_dataset');
+            }
+        }
+
+// ==================== Session ID ====================
+        function getOrCreateSessionId() {
+            let sessionId = localStorage.getItem('graph_session_id');
+            if (!sessionId) {
+                sessionId = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
+                    const r = Math.random() * 16 | 0;
+                    const v = c === 'x' ? r : (r & 0x3 | 0x8);
+                    return v.toString(16);
+                });
+                localStorage.setItem('graph_session_id', sessionId);
+            }
+            return sessionId;
+        }
+        
+        function displaySessionId() {
+            const sessionId = getOrCreateSessionId();
+            document.getElementById('sessionIdDisplay').textContent = sessionId;
+        }
+        
+        function resetSessionId() {
+            if (confirm('确定要重置Session ID吗？')) {
+                localStorage.removeItem('graph_session_id');
+                displaySessionId();
+                showMessage('Session ID已重置', 'success');
+            }
+        }
+        
+        // ==================== Schema 管理 ====================
+        const schemaFolderExpanded = {};
+        let currentSchemaFolder = '';
+        
+        async function loadSchemaFolders() {
+            try {
+                const response = await axios.get(`${API_BASE}/api/schemas/folders`);
+                return response.data.folders || [];
+            } catch (error) {
+                return [];
+            }
+        }
+        
+        async function loadSchemas() {
+            try {
+                const [rootResponse, foldersResponse] = await Promise.all([
+                    axios.get(`${API_BASE}/api/schemas`),
+                    axios.get(`${API_BASE}/api/schemas/folders`)
+                ]);
+                
+                const rootSchemas = rootResponse.data.schemas || [];
+                const folders = foldersResponse.data.folders || [];
+                const listDiv = document.getElementById('schemaList');
+                
+                if (rootSchemas.length === 0 && folders.length === 0) {
+                    listDiv.innerHTML = '<div class="empty-state">暂无Schema</div>';
+                    return;
+                }
+                
+                let html = '';
+                
+                if (rootSchemas.length > 0) {
+                    html += '<div style="margin-bottom: 20px;"><h4 style="margin-bottom: 10px; color: #666;">根目录</h4>';
+                    html += rootSchemas.map(schema => {
+                        const isDefault = schema === 'electrolytes';
+                        return `
+                            <div class="list-item">
+                                <div>
+                                    <span class="name">${escapeHtml(schema)}</span>
+                                    ${isDefault ? '<span class="default-badge">默认</span>' : ''}
+                                </div>
+                                <div class="actions">
+                                    <button class="btn btn-small" onclick="viewRootSchema('${escapeHtml(schema)}')">查看</button>
+                                    ${!isDefault ? `
+                                        <button class="btn btn-small" onclick="editRootSchema('${escapeHtml(schema)}')">编辑</button>
+                                        <button class="btn btn-small btn-danger" onclick="deleteRootSchemaConfirm('${escapeHtml(schema)}')">删除</button>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                    html += '</div>';
+                }
+                
+                if (folders.length > 0) {
+                    html += '<div><h4 style="margin-bottom: 10px; color: #666;">Schema 文件夹</h4>';
+                    
+                    for (const folder of folders) {
+                        const folderName = folder.name;
+                        const isExpanded = schemaFolderExpanded[folderName];
+                        
+                        html += `
+                            <div class="list-item" style="flex-direction: column; align-items: stretch;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="name" style="font-weight: bold;">${escapeHtml(folderName)}</span>
+                                        <span style="color: #999; font-size: 12px;">[文件夹]</span>
+                                    </div>
+                                    <div class="actions">
+                                        <button class="btn btn-small" onclick="toggleSchemaFolder('${escapeHtml(folderName)}')">${isExpanded ? '收起' : '展开'}</button>
+                                        <button class="btn btn-small" onclick="showCreateSchemaInFolderModal('${escapeHtml(folderName)}')">新建Schema</button>
+                                        <button class="btn btn-small btn-danger" onclick="deleteSchemaFolderConfirm('${escapeHtml(folderName)}')">删除</button>
+                                    </div>
+                                </div>
+                        `;
+                        
+                        if (isExpanded) {
+                            try {
+                                const schemasResponse = await axios.get(`${API_BASE}/api/schemas/folder/${encodeURIComponent(folderName)}`);
+                                const schemas = schemasResponse.data.schemas || [];
+                                
+                                html += '<div style="margin-left: 15px; margin-top: 10px; border-left: 2px solid #e0e0e0; padding-left: 15px;">';
+                                
+                                for (const schemaName of schemas) {
+                                    html += `
+                                        <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f0f0;">
+                                            <div style="font-size: 13px; color: #333;">${escapeHtml(schemaName)}</div>
+                                            <div class="actions">
+                                                <button class="btn btn-small" onclick="viewSchemaInFolder('${escapeHtml(folderName)}', '${escapeHtml(schemaName)}')">查看</button>
+                                                <button class="btn btn-small" onclick="editSchemaInFolder('${escapeHtml(folderName)}', '${escapeHtml(schemaName)}')">编辑</button>
+                                                <button class="btn btn-small btn-danger" onclick="deleteSchemaInFolderConfirm('${escapeHtml(folderName)}', '${escapeHtml(schemaName)}')">删除</button>
+                                            </div>
+                                        </div>
+                                    `;
+                                }
+                                
+                                if (schemas.length === 0) {
+                                    html += '<div style="padding: 8px 0; color: #999; font-size: 12px;">空文件夹</div>';
+                                }
+                                
+                                html += '</div>';
+                            } catch (e) {
+                                html += `<div style="margin-left: 15px; color: red; font-size: 12px;">加载失败</div>`;
+                            }
+                        }
+                        
+                        html += '</div>';
+                    }
+                    
+                    html += '</div>';
+                }
+                
+                listDiv.innerHTML = html;
+            } catch (error) {
+                showMessage('加载Schema列表失败: ' + (error.response?.data?.detail || error.message), 'error');
+            }
+        }
+        
+        function toggleSchemaFolder(folderName) {
+            schemaFolderExpanded[folderName] = !schemaFolderExpanded[folderName];
+            loadSchemas();
+        }
+        
+        async function viewRootSchema(schemaName) {
+            try {
+                const response = await axios.get(`${API_BASE}/api/schema/${schemaName}`);
+                document.getElementById('modalSchemaFolder').value = '';
+                document.getElementById('modalSchemaName').value = response.data.schema_name;
+                document.getElementById('modalSchemaContent').value = JSON.stringify(response.data.schema_content, null, 2);
+                document.getElementById('modalSchemaFolder').disabled = true;
+                document.getElementById('modalSchemaName').disabled = true;
+                document.getElementById('schemaModalTitle').textContent = '查看Schema';
+                document.getElementById('schemaSaveBtn').style.display = 'none';
+                document.getElementById('schemaModal').classList.add('show');
+            } catch (error) {
+                showMessage('加载Schema失败', 'error');
+            }
+        }
+        
+        async function editRootSchema(schemaName) {
+            try {
+                const response = await axios.get(`${API_BASE}/api/schema/${schemaName}`);
+                document.getElementById('modalSchemaFolder').value = '';
+                document.getElementById('modalSchemaName').value = response.data.schema_name;
+                document.getElementById('modalSchemaContent').value = JSON.stringify(response.data.schema_content, null, 2);
+                document.getElementById('modalSchemaFolder').disabled = true;
+                document.getElementById('modalSchemaName').disabled = true;
+                document.getElementById('schemaModalTitle').textContent = '编辑Schema';
+                document.getElementById('schemaSaveBtn').style.display = 'inline-block';
+                document.getElementById('schemaModal').classList.add('show');
+                currentSchemaFolder = '';
+            } catch (error) {
+                showMessage('加载Schema失败', 'error');
+            }
+        }
+        
+        async function deleteRootSchemaConfirm(schemaName) {
+            if (confirm(`确定要删除Schema "${schemaName}" 吗？`)) {
+                try {
+                    await axios.post(`${API_BASE}/api/schema/delete`, { schema_name: schemaName });
+                    showMessage('Schema删除成功', 'success');
+                    loadSchemas();
+                } catch (error) {
+                    showMessage('删除失败', 'error');
+                }
+            }
+        }
+        
+        async function viewSchemaInFolder(folderName, schemaName) {
+            try {
+                const response = await axios.get(`${API_BASE}/api/schemas/folder/${encodeURIComponent(folderName)}/${encodeURIComponent(schemaName)}`);
+                document.getElementById('modalSchemaFolder').value = folderName;
+                document.getElementById('modalSchemaName').value = response.data.schema_name;
+                document.getElementById('modalSchemaContent').value = JSON.stringify(response.data.schema_content, null, 2);
+                document.getElementById('modalSchemaFolder').disabled = true;
+                document.getElementById('modalSchemaName').disabled = true;
+                document.getElementById('schemaModalTitle').textContent = '查看Schema';
+                document.getElementById('schemaSaveBtn').style.display = 'none';
+                document.getElementById('schemaModal').classList.add('show');
+            } catch (error) {
+                showMessage('加载Schema失败', 'error');
+            }
+        }
+        
+        async function editSchemaInFolder(folderName, schemaName) {
+            try {
+                const response = await axios.get(`${API_BASE}/api/schemas/folder/${encodeURIComponent(folderName)}/${encodeURIComponent(schemaName)}`);
+                document.getElementById('modalSchemaFolder').value = folderName;
+                document.getElementById('modalSchemaName').value = response.data.schema_name;
+                document.getElementById('modalSchemaContent').value = JSON.stringify(response.data.schema_content, null, 2);
+                document.getElementById('modalSchemaFolder').disabled = true;
+                document.getElementById('modalSchemaName').disabled = true;
+                document.getElementById('schemaModalTitle').textContent = '编辑Schema';
+                document.getElementById('schemaSaveBtn').style.display = 'inline-block';
+                document.getElementById('schemaModal').classList.add('show');
+                currentSchemaFolder = folderName;
+            } catch (error) {
+                showMessage('加载Schema失败', 'error');
+            }
+        }
+        
+        async function deleteSchemaInFolderConfirm(folderName, schemaName) {
+            if (confirm(`确定要删除Schema "${folderName}/${schemaName}" 吗？`)) {
+                try {
+                    await axios.post(`${API_BASE}/api/schemas/folder/delete-schema`, { 
+                        folder_name: folderName, schema_name: schemaName 
+                    });
+                    showMessage('Schema删除成功', 'success');
+                    loadSchemas();
+                } catch (error) {
+                    showMessage('删除失败: ' + (error.response?.data?.detail || error.message), 'error');
+                }
+            }
+        }
+        
+        async function deleteSchemaFolderConfirm(folderName) {
+            if (confirm(`确定要删除文件夹 "${folderName}" 及其所有内容吗？`)) {
+                try {
+                    await axios.post(`${API_BASE}/api/schemas/folder/delete`, { folder_name: folderName });
+                    showMessage('文件夹删除成功', 'success');
+                    loadSchemas();
+                } catch (error) {
+                    showMessage('删除失败: ' + (error.response?.data?.detail || error.message), 'error');
+                }
+            }
+        }
+        
+        async function showCreateSchemaModal() {
+            const folders = await loadSchemaFolders();
+            const folderSelect = document.getElementById('modalSchemaFolder');
+            folderSelect.innerHTML = '<option value="">根目录</option>';
+            folders.forEach(folder => {
+                folderSelect.innerHTML += `<option value="${escapeHtml(folder.name)}">${escapeHtml(folder.name)}</option>`;
+            });
+            
+            document.getElementById('modalSchemaName').value = '';
+            document.getElementById('modalSchemaContent').value = '';
+            document.getElementById('modalSchemaFolder').disabled = false;
+            document.getElementById('modalSchemaName').disabled = false;
+            document.getElementById('schemaModalTitle').textContent = '创建Schema';
+            document.getElementById('schemaSaveBtn').style.display = 'inline-block';
+            document.getElementById('schemaModal').classList.add('show');
+            currentSchemaFolder = '';
+        }
+        
+        async function showCreateSchemaInFolderModal(folderName) {
+            const folders = await loadSchemaFolders();
+            const folderSelect = document.getElementById('modalSchemaFolder');
+            folderSelect.innerHTML = '<option value="">根目录</option>';
+            folders.forEach(folder => {
+                folderSelect.innerHTML += `<option value="${escapeHtml(folder.name)}">${escapeHtml(folder.name)}</option>`;
+            });
+            
+            document.getElementById('modalSchemaFolder').value = folderName;
+            document.getElementById('modalSchemaName').value = '';
+            document.getElementById('modalSchemaContent').value = '';
+            document.getElementById('modalSchemaFolder').disabled = false;
+            document.getElementById('modalSchemaName').disabled = false;
+            document.getElementById('schemaModalTitle').textContent = '创建Schema';
+            document.getElementById('schemaSaveBtn').style.display = 'inline-block';
+            document.getElementById('schemaModal').classList.add('show');
+            currentSchemaFolder = folderName;
+        }
+        
+        function closeSchemaModal() {
+            document.getElementById('schemaModal').classList.remove('show');
+            currentSchemaFolder = '';
+        }
+        
+        async function saveSchema() {
+            const folderName = document.getElementById('modalSchemaFolder').value;
+            const schemaName = document.getElementById('modalSchemaName').value.trim();
+            const schemaContentStr = document.getElementById('modalSchemaContent').value.trim();
+            
+            if (!schemaName || !schemaContentStr) {
+                showMessage('请填写完整信息', 'error');
+                return;
+            }
+            
+            try {
+                const schemaContent = JSON.parse(schemaContentStr);
+                const isEdit = document.getElementById('modalSchemaName').disabled;
+                
+                if (isEdit) {
+                    if (folderName) {
+                        await axios.post(`${API_BASE}/api/schema/update`, { 
+                            schema_name: schemaName, schema_content: schemaContent, folder_name: folderName 
+                        });
+                    } else {
+                        await axios.post(`${API_BASE}/api/schema/update`, { 
+                            schema_name: schemaName, schema_content: schemaContent 
+                        });
+                    }
+                    showMessage('Schema更新成功', 'success');
+                } else {
+                    if (folderName) {
+                        await axios.post(`${API_BASE}/api/schemas/folder/create-schema`, { 
+                            folder_name: folderName, schema_name: schemaName, schema_content: schemaContent, force_overwrite: false 
+                        });
+                    } else {
+                        await axios.post(`${API_BASE}/api/schema/create`, { 
+                            schema_name: schemaName, schema_content: schemaContent, force_overwrite: false 
+                        });
+                    }
+                    showMessage('Schema创建成功', 'success');
+                }
+                
+                closeSchemaModal();
+                loadSchemas();
+            } catch (error) {
+                showMessage('保存失败: ' + (error.response?.data?.detail || error.message), 'error');
+            }
+        }
+        
+        function showCreateSchemaFolderModal() {
+            document.getElementById('modalSchemaFolderName').value = '';
+            document.getElementById('schemaFolderModal').classList.add('show');
+        }
+        
+        function closeSchemaFolderModal() {
+            document.getElementById('schemaFolderModal').classList.remove('show');
+        }
+        
+        async function saveSchemaFolder() {
+            const folderName = document.getElementById('modalSchemaFolderName').value.trim();
+            if (!folderName) {
+                showMessage('请输入文件夹名称', 'error');
+                return;
+            }
+            try {
+                await axios.post(`${API_BASE}/api/schemas/folder/create`, { folder_name: folderName });
+                showMessage('文件夹创建成功', 'success');
+                closeSchemaFolderModal();
+                loadSchemas();
+            } catch (error) {
+                showMessage('创建失败: ' + (error.response?.data?.detail || error.message), 'error');
+            }
+        }
+        
+        // ==================== Prompt 管理 ====================
+        const stagedPromptExpanded = {};
+        
+        async function loadPrompts() {
+            try {
+                const [singleResponse, stagedResponse] = await Promise.all([
+                    axios.get(`${API_BASE}/api/prompts`),
+                    axios.get(`${API_BASE}/api/prompts/staged`)
+                ]);
+                
+                const singlePrompts = singleResponse.data.prompts || [];
+                const stagedPrompts = stagedResponse.data.staged_prompts || [];
+                const listDiv = document.getElementById('promptList');
+                
+                if (singlePrompts.length === 0 && stagedPrompts.length === 0) {
+                    listDiv.innerHTML = '<div class="empty-state">暂无Prompt</div>';
+                    return;
+                }
+                
+                let html = '';
+                
+                if (singlePrompts.length > 0) {
+                    html += '<div style="margin-bottom: 20px;"><h4 style="margin-bottom: 10px; color: #666;">单文件 Prompt</h4>';
+                    html += singlePrompts.map(prompt => {
+                        const isDefault = prompt === 'electrolytes';
+                        return `
+                            <div class="list-item">
+                                <div>
+                                    <span class="name">${escapeHtml(prompt)}</span>
+                                    ${isDefault ? '<span class="default-badge">默认</span>' : ''}
+                                </div>
+                                <div class="actions">
+                                    <button class="btn btn-small" onclick="viewPrompt('${escapeHtml(prompt)}')">查看</button>
+                                    ${!isDefault ? `
+                                        <button class="btn btn-small" onclick="editPrompt('${escapeHtml(prompt)}')">编辑</button>
+                                        <button class="btn btn-small btn-danger" onclick="deletePromptConfirm('${escapeHtml(prompt)}')">删除</button>
+                                    ` : ''}
+                                </div>
+                            </div>
+                        `;
+                    }).join('');
+                    html += '</div>';
+                }
+                
+                if (stagedPrompts.length > 0) {
+                    html += '<div><div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 10px;"><h4 style="color: #666; margin: 0;">分阶段 Prompt 文件夹</h4><button class="btn btn-small" onclick="showCreateStagedFolderModal()">创建文件夹</button></div>';
+                    
+                    for (const folderName of stagedPrompts) {
+                        const isExpanded = stagedPromptExpanded[folderName];
+                        const isDefault = folderName === 'staged_customized' || folderName === 'staged';
+                        
+                        html += `
+                            <div class="list-item" style="flex-direction: column; align-items: stretch;">
+                                <div style="display: flex; justify-content: space-between; align-items: center;">
+                                    <div style="display: flex; align-items: center; gap: 8px;">
+                                        <span class="name" style="font-weight: bold;">${escapeHtml(folderName)}</span>
+                                        <span style="color: #999; font-size: 12px;">[分阶段]</span>
+                                        ${isDefault ? '<span class="default-badge">默认</span>' : ''}
+                                    </div>
+                                    <div class="actions">
+                                        <button class="btn btn-small" onclick="toggleStagedPrompt('${escapeHtml(folderName)}')">${isExpanded ? '收起' : '展开'}</button>
+                                        ${!isDefault ? `<button class="btn btn-small btn-danger" onclick="deleteStagedFolderConfirm('${escapeHtml(folderName)}')">删除</button>` : ''}
+                                    </div>
+                                </div>
+                        `;
+                        
+                        if (isExpanded) {
+                            try {
+                                const filesResponse = await axios.get(`${API_BASE}/api/prompt/staged/${encodeURIComponent(folderName)}`);
+                                const files = filesResponse.data.files || [];
+                                
+                                html += '<div style="margin-left: 15px; margin-top: 10px; border-left: 2px solid #e0e0e0; padding-left: 15px;">';
+                                
+                                for (const file of files) {
+                                    if (file.exists) {
+                                        const stageNum = file.filename.match(/stage(\d)/)?.[1] || '?';
+                                        html += `
+                                            <div style="display: flex; justify-content: space-between; align-items: center; padding: 8px 0; border-bottom: 1px solid #f0f0f0;">
+                                                <div style="flex: 1;">
+                                                    <div style="font-size: 13px; color: #333;">
+                                                        <span style="background: #6b73ff; color: white; padding: 2px 8px; border-radius: 4px; margin-right: 8px; font-size: 11px;">Stage ${stageNum}</span>
+                                                        ${escapeHtml(file.filename)}
+                                                    </div>
+                                                    <div style="font-size: 11px; color: #999; margin-top: 4px; margin-left: 50px;">${escapeHtml(file.preview)}</div>
+                                                </div>
+                                                <div class="actions">
+                                                    <button class="btn btn-small" onclick="viewStagedPromptFile('${escapeHtml(folderName)}', '${escapeHtml(file.filename)}')">查看</button>
+                                                    ${!isDefault ? `
+                                                        <button class="btn btn-small" onclick="editStagedPromptFile('${escapeHtml(folderName)}', '${escapeHtml(file.filename)}')">编辑</button>
+                                                    ` : ''}
+                                                </div>
+                                            </div>
+                                        `;
+                                    }
+                                }
+                                
+                                html += '</div>';
+                            } catch (e) {
+                                html += `<div style="margin-left: 15px; color: red; font-size: 12px;">加载文件列表失败</div>`;
+                            }
+                        }
+                        
+                        html += '</div>';
+                    }
+                    
+                    html += '</div>';
+                }
+                
+                listDiv.innerHTML = html;
+            } catch (error) {
+                showMessage('加载Prompt列表失败: ' + (error.response?.data?.detail || error.message), 'error');
+            }
+        }
+        
+        function toggleStagedPrompt(folderName) {
+            stagedPromptExpanded[folderName] = !stagedPromptExpanded[folderName];
+            loadPrompts();
+        }
+        
+        async function viewStagedPromptFile(folderName, stageFile) {
+            try {
+                const response = await axios.get(`${API_BASE}/api/prompt/staged/${encodeURIComponent(folderName)}/${encodeURIComponent(stageFile)}`);
+                document.getElementById('modalPromptName').value = `${folderName}/${stageFile}`;
+                document.getElementById('modalPromptContent').value = response.data.content;
+                document.getElementById('modalPromptName').disabled = true;
+                document.getElementById('modalPromptContent').disabled = true;
+                document.getElementById('promptModalTitle').textContent = `查看 ${stageFile}`;
+                document.getElementById('promptSaveBtn').style.display = 'none';
+                document.getElementById('promptModal').classList.add('show');
+            } catch (error) {
+                showMessage('加载失败: ' + (error.response?.data?.detail || error.message), 'error');
+            }
+        }
+        
+        async function editStagedPromptFile(folderName, stageFile) {
+            try {
+                const response = await axios.get(`${API_BASE}/api/prompt/staged/${encodeURIComponent(folderName)}/${encodeURIComponent(stageFile)}`);
+                document.getElementById('modalPromptName').value = `${folderName}/${stageFile}`;
+                document.getElementById('modalPromptContent').value = response.data.content;
+                document.getElementById('modalPromptName').disabled = true;
+                document.getElementById('modalPromptContent').disabled = false;
+                document.getElementById('promptModalTitle').textContent = `编辑 ${stageFile}`;
+                document.getElementById('promptSaveBtn').style.display = 'inline-block';
+                document.getElementById('promptModal').classList.add('show');
+                document.getElementById('promptModal').dataset.stagedFolder = folderName;
+                document.getElementById('promptModal').dataset.stagedFile = stageFile;
+            } catch (error) {
+                showMessage('加载失败: ' + (error.response?.data?.detail || error.message), 'error');
+            }
+        }
+        
+        async function viewPrompt(promptName) {
+            try {
+                const response = await axios.get(`${API_BASE}/api/prompt/${promptName}`);
+                document.getElementById('modalPromptName').value = response.data.prompt_name;
+                document.getElementById('modalPromptContent').value = response.data.prompt_content;
+                document.getElementById('modalPromptName').disabled = true;
+                document.getElementById('promptModalTitle').textContent = '查看Prompt';
+                document.getElementById('promptModal').classList.add('show');
+            } catch (error) {
+                showMessage('加载Prompt失败', 'error');
+            }
+        }
+        
+        async function editPrompt(promptName) {
+            try {
+                const response = await axios.get(`${API_BASE}/api/prompt/${promptName}`);
+                document.getElementById('modalPromptName').value = response.data.prompt_name;
+                document.getElementById('modalPromptContent').value = response.data.prompt_content;
+                document.getElementById('modalPromptName').disabled = true;
+                document.getElementById('promptModalTitle').textContent = '编辑Prompt';
+                document.getElementById('promptModal').classList.add('show');
+            } catch (error) {
+                showMessage('加载Prompt失败', 'error');
+            }
+        }
+        
+        function showCreatePromptModal() {
+            document.getElementById('modalPromptName').value = '';
+            document.getElementById('modalPromptContent').value = '';
+            document.getElementById('modalPromptName').disabled = false;
+            document.getElementById('promptModalTitle').textContent = '创建Prompt';
+            document.getElementById('promptModal').classList.add('show');
+        }
+        
+        function closePromptModal() {
+            document.getElementById('promptModal').classList.remove('show');
+            const modal = document.getElementById('promptModal');
+            delete modal.dataset.stagedFolder;
+            delete modal.dataset.stagedFile;
+            document.getElementById('modalPromptContent').disabled = false;
+            document.getElementById('promptSaveBtn').style.display = 'inline-block';
+        }
+        
+        async function savePrompt() {
+            const promptName = document.getElementById('modalPromptName').value.trim();
+            const promptContent = document.getElementById('modalPromptContent').value.trim();
+            const modal = document.getElementById('promptModal');
+            
+            const stagedFolder = modal.dataset.stagedFolder;
+            const stagedFile = modal.dataset.stagedFile;
+            
+            if (stagedFolder && stagedFile) {
+                try {
+                    await axios.post(`${API_BASE}/api/prompt/staged/update`, {
+                        folder_name: stagedFolder,
+                        stage_file: stagedFile,
+                        content: promptContent
+                    });
+                    showMessage('Prompt 文件更新成功', 'success');
+                    closePromptModal();
+                    loadPrompts();
+                } catch (error) {
+                    showMessage('保存失败: ' + (error.response?.data?.detail || error.message), 'error');
+                }
+                return;
+            }
+            
+            if (!promptName || !promptContent) {
+                showMessage('请填写完整信息', 'error');
+                return;
+            }
+            
+            try {
+                const isEdit = document.getElementById('modalPromptName').disabled;
+                
+                if (isEdit) {
+                    await axios.post(`${API_BASE}/api/prompt/update`, { prompt_name: promptName, prompt_content: promptContent });
+                    showMessage('Prompt更新成功', 'success');
+                } else {
+                    await axios.post(`${API_BASE}/api/prompt/create`, { prompt_name: promptName, prompt_content: promptContent, force_overwrite: false });
+                    showMessage('Prompt创建成功', 'success');
+                }
+                
+                closePromptModal();
+                loadPrompts();
+            } catch (error) {
+                showMessage('保存失败: ' + (error.response?.data?.detail || error.message), 'error');
+            }
+        }
+        
+        async function deletePromptConfirm(promptName) {
+            if (confirm(`确定要删除Prompt "${promptName}" 吗？`)) {
+                try {
+                    await axios.post(`${API_BASE}/api/prompt/delete`, { prompt_name: promptName });
+                    showMessage('Prompt删除成功', 'success');
+                    loadPrompts();
+                } catch (error) {
+                    showMessage('删除失败', 'error');
+                }
+            }
+        }
+        
+        // ==================== 分阶段 Prompt 文件夹 创建/删除 ====================
+
+        function showCreateStagedFolderModal() {
+            document.getElementById('newStagedFolderName').value = '';
+            document.getElementById('stagedFolderInitMode').value = 'copy';
+            populateSourceFolderOptions();
+            toggleSourceFolderSelect();
+            document.getElementById('stagedFolderModal').classList.add('show');
+        }
+
+        function closeStagedFolderModal() {
+            document.getElementById('stagedFolderModal').classList.remove('show');
+        }
+
+        function toggleSourceFolderSelect() {
+            const mode = document.getElementById('stagedFolderInitMode').value;
+            document.getElementById('sourceFolderGroup').style.display = mode === 'copy' ? 'block' : 'none';
+        }
+
+        async function populateSourceFolderOptions() {
+            const select = document.getElementById('stagedFolderSource');
+            select.innerHTML = '<option value="">加载中...</option>';
+            try {
+                const response = await axios.get(`${API_BASE}/api/prompts/staged`);
+                const folders = response.data.staged_prompts || [];
+                select.innerHTML = '';
+                folders.forEach(name => {
+                    const opt = document.createElement('option');
+                    opt.value = name;
+                    opt.textContent = name;
+                    if (name === 'MA-Prompt2603') opt.selected = true;
+                    select.appendChild(opt);
+                });
+                if (folders.length === 0) {
+                    select.innerHTML = '<option value="">暂无可用文件夹</option>';
+                }
+            } catch (e) {
+                select.innerHTML = '<option value="">加载失败</option>';
+            }
+        }
+
+        async function createStagedFolder() {
+            const folderName = document.getElementById('newStagedFolderName').value.trim();
+            if (!folderName) {
+                showMessage('请输入文件夹名称', 'error');
+                return;
+            }
+
+            const mode = document.getElementById('stagedFolderInitMode').value;
+            const payload = { folder_name: folderName };
+            if (mode === 'copy') {
+                const sourceFolder = document.getElementById('stagedFolderSource').value;
+                if (!sourceFolder) {
+                    showMessage('请选择源文件夹', 'error');
+                    return;
+                }
+                payload.source_folder = sourceFolder;
+            }
+
+            try {
+                const response = await axios.post(`${API_BASE}/api/prompt/staged/folder/create`, payload);
+                showMessage(response.data.message || '创建成功', 'success');
+                closeStagedFolderModal();
+                loadPrompts();
+            } catch (error) {
+                showMessage('创建失败: ' + (error.response?.data?.detail || error.message), 'error');
+            }
+        }
+
+        async function deleteStagedFolderConfirm(folderName) {
+            if (!confirm(`确定要删除 Staged Prompt 文件夹 "${folderName}" 及其所有 stage 文件吗？\n此操作不可撤销！`)) {
+                return;
+            }
+            try {
+                const response = await axios.post(`${API_BASE}/api/prompt/staged/folder/delete`, { folder_name: folderName });
+                showMessage(response.data.message || '删除成功', 'success');
+                loadPrompts();
+            } catch (error) {
+                showMessage('删除失败: ' + (error.response?.data?.detail || error.message), 'error');
+            }
+        }
+
+        // ==================== Corpus 管理 ====================
+        async function loadCorpusList() {
+            try {
+                const response = await axios.get(`${API_BASE}/api/corpus`);
+                const items = response.data.items || [];
+                const listDiv = document.getElementById('corpusList');
+                
+                if (items.length === 0) {
+                    listDiv.innerHTML = '<div class="empty-state">暂无Corpus</div>';
+                    return;
+                }
+                
+                listDiv.innerHTML = items.map(item => {
+                    if (item.type === 'direct') {
+                        // 规则B：单级目录
+                        return renderDirectCorpusItem(item);
+                    } else if (item.type === 'folder' || item.type === 'mixed') {
+                        // 规则A：两级目录的主题文件夹（mixed 同时有自身语料和子文件夹）
+                        return renderFolderCorpusItem(item);
+                    }
+                    return '';
+                }).join('');
+            } catch (error) {
+                showMessage('加载Corpus列表失败', 'error');
+            }
+        }
+        
+        function renderDirectCorpusItem(item) {
+            const safeName = escapeHtml(item.name);
+            const dataId = JSON.stringify(item.id);
+            const dataName = JSON.stringify(item.name);
+            return `
+                <div class="corpus-direct-item">
+                    <div class="name">${safeName}</div>
+                    <div class="actions">
+                        <button class="btn btn-small" data-corpus-id=${dataId} onclick="viewCorpus(this.dataset.corpusId)">查看</button>
+                        <button class="btn btn-small" data-corpus-id=${dataId} onclick="editCorpus(this.dataset.corpusId)">编辑</button>
+                        <button class="btn btn-small btn-danger" data-corpus-id=${dataId} onclick="deleteCorpusConfirm(this.dataset.corpusId)">删除语料</button>
+                        <button class="btn-folder" data-folder-path=${dataId} data-folder-name=${dataName} onclick="showRenameFolderModal(this.dataset.folderPath, this.dataset.folderName)">重命名</button>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function renderFolderCorpusItem(item) {
+            const safeName = escapeHtml(item.name);
+            const dataId = JSON.stringify(item.id);
+            const dataName = JSON.stringify(item.name);
+            const childrenHtml = (item.children || []).map(child => {
+                const childSafeName = escapeHtml(child.name);
+                const childSafeTitle = escapeHtml(child.title || child.name);
+                const childDataId = JSON.stringify(child.id);
+                return `
+                    <div class="corpus-item-row" data-title="${childSafeTitle}">
+                        <div class="name">${childSafeName}</div>
+                        <div class="actions">
+                            <button class="btn btn-small" data-corpus-id=${childDataId} onclick="viewCorpus(this.dataset.corpusId)">查看</button>
+                            <button class="btn btn-small" data-corpus-id=${childDataId} onclick="editCorpus(this.dataset.corpusId)">编辑</button>
+                            <button class="btn btn-small btn-danger" data-corpus-id=${childDataId} onclick="deleteCorpusConfirm(this.dataset.corpusId)">删除</button>
+                        </div>
+                    </div>
+                `;
+            }).join('');
+            
+            const folderId = 'folder_' + Math.random().toString(36).substr(2, 9);
+            
+            return `
+                <div class="corpus-folder" id="${folderId}">
+                    <div class="corpus-folder-header" onclick="toggleFolder(this)">
+                        <div class="folder-title">
+                            <span class="arrow"></span>
+                            <span>${safeName} <span style="color:#909399;font-size:12px;font-weight:normal;">(${(item.children || []).length} 篇)</span></span>
+                        </div>
+                        <div class="folder-actions" onclick="event.stopPropagation();">
+                            <button class="btn-folder btn-folder-primary" data-folder-path=${dataId} onclick="showCreateCorpusModal(this.dataset.folderPath)">+ 创建语料</button>
+                            <button class="btn-folder" data-folder-path=${dataId} data-folder-name=${dataName} onclick="showRenameFolderModal(this.dataset.folderPath, this.dataset.folderName)">重命名</button>
+                            <button class="btn-folder btn-folder-danger" data-folder-path=${dataId} data-folder-name=${dataName} onclick="deleteFolderConfirm(this.dataset.folderPath, this.dataset.folderName)">删除</button>
+                        </div>
+                    </div>
+                    <div class="corpus-folder-children">
+                        <div class="folder-search-bar">
+                            <input type="text" class="folder-search-input" placeholder="搜索子文献（标题 / 名称）..." oninput="filterFolderChildren('${folderId}', this.value)">
+                        </div>
+                        <div class="folder-children-list">
+                            ${childrenHtml}
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+        
+        function toggleFolder(header) {
+            const children = header.nextElementSibling;
+            const arrow = header.querySelector('.arrow');
+            if (children.classList.contains('hidden')) {
+                children.classList.remove('hidden');
+                arrow.classList.remove('collapsed');
+            } else {
+                children.classList.add('hidden');
+                arrow.classList.add('collapsed');
+            }
+        }
+        
+        function filterFolderChildren(folderId, query) {
+            const folder = document.getElementById(folderId);
+            if (!folder) return;
+            const rows = folder.querySelectorAll('.corpus-item-row');
+            const listContainer = folder.querySelector('.folder-children-list');
+            const lowerQuery = query.trim().toLowerCase();
+            let visibleCount = 0;
+            
+            rows.forEach(row => {
+                const nameEl = row.querySelector('.name');
+                const nameText = nameEl ? nameEl.textContent.toLowerCase() : '';
+                const titleText = (row.dataset.title || '').toLowerCase();
+                if (!lowerQuery || nameText.includes(lowerQuery) || titleText.includes(lowerQuery)) {
+                    row.style.display = '';
+                    visibleCount++;
+                } else {
+                    row.style.display = 'none';
+                }
+            });
+            
+            // 更新无结果提示
+            let noResults = listContainer.querySelector('.folder-no-results');
+            if (visibleCount === 0 && lowerQuery) {
+                if (!noResults) {
+                    noResults = document.createElement('div');
+                    noResults.className = 'folder-no-results';
+                    noResults.textContent = '无匹配结果';
+                    listContainer.appendChild(noResults);
+                }
+                noResults.style.display = '';
+            } else if (noResults) {
+                noResults.style.display = 'none';
+            }
+        }
+        
+        function switchCorpusView(view) {
+            document.querySelectorAll('.view-content').forEach(content => content.classList.remove('active'));
+            document.getElementById(view + 'View').classList.add('active');
+        }
+        
+        function renderCorpusPreview(content) {
+            const previewDiv = document.getElementById('corpusPreview');
+            try {
+                const items = JSON.parse(content);
+                if (!Array.isArray(items) || items.length === 0) {
+                    previewDiv.innerHTML = '<div class="empty-state">暂无内容</div>';
+                    return;
+                }
+                
+                previewDiv.innerHTML = items.map((item) => `
+                    <div class="corpus-item">
+                        <div class="corpus-item-header">${escapeHtmlKeepLatex(item.title || '无标题')}</div>
+                        <div class="corpus-item-body">${escapeHtmlKeepLatex(item.text || '')}</div>
+                    </div>
+                `).join('');
+                
+                renderLatex(previewDiv);
+            } catch (e) {
+                previewDiv.innerHTML = '<div class="empty-state">JSON 格式解析失败</div>';
+            }
+        }
+        
+        async function viewCorpus(corpusName) {
+            try {
+                const response = await axios.get(`${API_BASE}/api/corpus/${corpusName}`);
+                document.getElementById('modalCorpusName').value = response.data.corpus_name;
+                
+                let content = response.data.corpus_content;
+                try {
+                    const parsed = JSON.parse(content);
+                    content = JSON.stringify(parsed, null, 2);
+                } catch (e) {}
+                
+                document.getElementById('modalCorpusContent').value = content;
+                document.getElementById('modalCorpusName').disabled = true;
+                document.getElementById('corpusModalTitle').textContent = '查看Corpus';
+                document.getElementById('corpusSaveBtn').style.display = 'none';
+                
+                renderCorpusPreview(content);
+                switchCorpusView('preview');
+                
+                document.getElementById('corpusModal').classList.add('show');
+            } catch (error) {
+                showMessage('加载Corpus失败', 'error');
+            }
+        }
+        
+        async function editCorpus(corpusName) {
+            try {
+                const response = await axios.get(`${API_BASE}/api/corpus/${corpusName}`);
+                document.getElementById('modalCorpusName').value = response.data.corpus_name;
+                
+                let content = response.data.corpus_content;
+                try {
+                    const parsed = JSON.parse(content);
+                    content = JSON.stringify(parsed, null, 2);
+                } catch (e) {}
+                
+                document.getElementById('modalCorpusContent').value = content;
+                document.getElementById('modalCorpusName').disabled = true;
+                document.getElementById('corpusModalTitle').textContent = '编辑Corpus';
+                document.getElementById('corpusSaveBtn').style.display = 'inline-block';
+                
+                switchCorpusView('json');
+                
+                document.getElementById('corpusModal').classList.add('show');
+            } catch (error) {
+                showMessage('加载Corpus失败', 'error');
+            }
+        }
+        
+        function showCreateCorpusModal(parentPath) {
+            document.getElementById('modalCorpusName').value = '';
+            document.getElementById('modalCorpusContent').value = '';
+            document.getElementById('modalCorpusName').disabled = false;
+            document.getElementById('corpusModalTitle').textContent = '创建Corpus';
+            document.getElementById('corpusSaveBtn').style.display = 'inline-block';
+            switchCorpusView('json');
+            // 刷新父文件夹下拉框
+            refreshCorpusParentSelect(parentPath || '');
+            document.getElementById('corpusModal').classList.add('show');
+        }
+        
+        function refreshCorpusParentSelect(defaultValue) {
+            const select = document.getElementById('modalCorpusParentSelect');
+            select.innerHTML = '<option value="">根目录 (input/)</option>';
+            // 加载当前语料列表中的 folder/mixed 类型作为可选父文件夹
+            axios.get(`${API_BASE}/api/corpus`).then(response => {
+                const items = response.data.items || [];
+                items.forEach(item => {
+                    if (item.type === 'folder' || item.type === 'mixed') {
+                        const option = document.createElement('option');
+                        option.value = item.id;
+                        option.textContent = item.name;
+                        select.appendChild(option);
+                    }
+                });
+                select.value = defaultValue || '';
+            }).catch(() => {
+                // 静默失败，保持根目录选项
+            });
+        }
+        
+        function onCorpusParentChange() {
+            // 可扩展：根据父文件夹变化更新提示等
+        }
+        
+        function closeCorpusModal() {
+            document.getElementById('corpusModal').classList.remove('show');
+        }
+        
+        async function saveCorpus() {
+            const corpusName = document.getElementById('modalCorpusName').value.trim();
+            const corpusContent = document.getElementById('modalCorpusContent').value.trim();
+            const parentPath = document.getElementById('modalCorpusParentSelect').value;
+            
+            if (!corpusName || !corpusContent) {
+                showMessage('请填写完整信息', 'error');
+                return;
+            }
+            
+            try {
+                JSON.parse(corpusContent);
+            } catch (e) {
+                showMessage('Corpus内容必须是有效的JSON', 'error');
+                return;
+            }
+            
+            try {
+                const isEdit = document.getElementById('modalCorpusName').disabled;
+                // 拼接完整路径：父路径 + corpus名称
+                const fullName = parentPath ? `${parentPath}/${corpusName}` : corpusName;
+                
+                if (isEdit) {
+                    await axios.post(`${API_BASE}/api/corpus/update`, { corpus_name: fullName, corpus_content: corpusContent });
+                    showMessage('Corpus更新成功', 'success');
+                } else {
+                    await axios.post(`${API_BASE}/api/corpus/create`, { corpus_name: fullName, corpus_content: corpusContent, force_new: false });
+                    showMessage('Corpus创建成功', 'success');
+                }
+                
+                closeCorpusModal();
+                loadCorpusList();
+            } catch (error) {
+                showMessage('保存失败: ' + (error.response?.data?.detail || error.message), 'error');
+            }
+        }
+        
+        async function deleteCorpusConfirm(corpusName) {
+            if (confirm(`确定要删除Corpus "${corpusName}" 吗？`)) {
+                try {
+                    await axios.post(`${API_BASE}/api/corpus/delete`, { corpus_name: corpusName });
+                    showMessage('Corpus删除成功', 'success');
+                    loadCorpusList();
+                } catch (error) {
+                    showMessage('删除失败', 'error');
+                }
+            }
+        }
+
+        function fillStage1Example() {
+            try {
+                const stage1Example = {
+                    "input": "【在这里填写一段示例文本，建议1-2句话，包含你关心的实体类型】",
+                    "output": {
+                        "entities": [
+                            {
+                                "canonical_name": "【实体标准名称：必须是规范化后的名称，例如 LiPF6 / ethylene carbonate】",
+                                "variants": [
+                                    "【该实体在文本中的别名或缩写，例如 EC / lithium hexafluorophosphate】"
+                                ],
+                                "schema_type": "【实体类型：必须来自系统schema，例如 ChemicalCompound / Solvent / Property / InterfacialLayer 等】",
+                                "source": "【原文中的完整片段（必须逐字复制），用于证明这个实体是从哪里来的】",
+                                "evidence": "【解释为什么这样抽取：例如为什么canonical_name这么选、为什么归这个类型】"
+                            }
+                        ],
+                        "abbreviation_mappings": {
+                            "【缩写，例如 EC】": "【对应的canonical_name，例如 ethylene carbonate】"
+                        }
+                    }
+                };
+
+                const stage1Textarea = document.getElementById('stage1ExamplesOverride');
+                if (!stage1Textarea) {
+                    showMessage('未找到 Stage1 输入框，无法填充示例', 'error');
+                    return;
+                }
+
+                stage1Textarea.value = JSON.stringify(stage1Example, null, 2);
+                showMessage('Stage1 示例 JSON 已填充', 'success');
+            } catch (e) {
+                showMessage('Stage1 示例自动填充失败: ' + (e?.message || String(e)), 'error');
+            }
+        }
+
+        function fillStage2Example() {
+            try {
+                const stage2Example = {
+                    "input": "【在这里填写一段示例文本，建议包含明确关系，例如A影响B】",
+                    "output": {
+                        "triples": [
+                            {
+                                "subject": "【主体实体：必须使用Stage1中的canonical_name】",
+                                "relation": "【关系类型：必须来自schema，例如 promotes / inhibits / leads_to / is_measured_by】",
+                                "object": "【客体实体：必须使用Stage1中的canonical_name】",
+                                "source": "【原文中同时包含subject和object的完整片段】",
+                                "evidence": "【解释关系方向+语法依据，例如主动/被动语态，为什么这样连边】"
+                            }
+                        ]
+                    }
+                };
+
+                const stage2Textarea = document.getElementById('stage2ExamplesOverride');
+                if (!stage2Textarea) {
+                    showMessage('未找到 Stage2 输入框，无法填充示例', 'error');
+                    return;
+                }
+
+                stage2Textarea.value = JSON.stringify(stage2Example, null, 2);
+                showMessage('Stage2 示例 JSON 已填充', 'success');
+            } catch (e) {
+                showMessage('Stage2 示例自动填充失败: ' + (e?.message || String(e)), 'error');
+            }
+        }
+        
+        // ==================== 生成图谱 ====================
+        async function loadCorpusOptions() {
+            try {
+                const response = await axios.get(`${API_BASE}/api/corpus/folders-for-generation`);
+                const folders = response.data.folders || [];
+                const select = document.getElementById('generateDatasetName');
+                select.innerHTML = '<option value="">请选择数据集</option>';
+                folders.forEach(folder => {
+                    const option = document.createElement('option');
+                    option.value = folder.name;
+                    let typeLabel = '';
+                    if (folder.type === 'direct') typeLabel = ' [单级]';
+                    else if (folder.type === 'folder') typeLabel = ' [主题]';
+                    else if (folder.type === 'mixed') typeLabel = ' [混合]';
+                    option.textContent = folder.name + typeLabel;
+                    select.appendChild(option);
+                });
+            } catch (error) {
+                showMessage('加载数据集失败', 'error');
+            }
+        }
+        
+        // ==================== 文件夹管理 ====================
+        
+        function showCreateFolderModal(parentPath) {
+            parentPath = parentPath || '';
+            document.getElementById('modalFolderParentPath').value = parentPath;
+            document.getElementById('modalFolderName').value = '';
+            document.getElementById('folderModalTitle').textContent = parentPath ? '新建子文件夹' : '新建文件夹';
+            document.getElementById('folderModal').classList.add('show');
+        }
+        
+        function closeFolderModal() {
+            document.getElementById('folderModal').classList.remove('show');
+        }
+        
+        async function saveFolder() {
+            const parentPath = document.getElementById('modalFolderParentPath').value;
+            const folderName = document.getElementById('modalFolderName').value.trim();
+            
+            if (!folderName) {
+                showMessage('请输入文件夹名称', 'error');
+                return;
+            }
+            
+            try {
+                await axios.post(`${API_BASE}/api/corpus/folder/create`, {
+                    parent_path: parentPath,
+                    folder_name: folderName
+                });
+                showMessage('文件夹创建成功', 'success');
+                closeFolderModal();
+                loadCorpusList();
+            } catch (error) {
+                showMessage('创建失败: ' + (error.response?.data?.detail || error.message), 'error');
+            }
+        }
+        
+        function showRenameFolderModal(folderPath, currentName) {
+            document.getElementById('modalRenameFolderPath').value = folderPath;
+            document.getElementById('modalRenameFolderOldName').value = currentName;
+            const displayInput = document.getElementById('modalRenameFolderOldNameDisplay');
+            if (displayInput) displayInput.value = currentName;
+            document.getElementById('modalRenameFolderNewName').value = currentName;
+            document.getElementById('renameFolderModal').classList.add('show');
+        }
+        
+        function closeRenameFolderModal() {
+            document.getElementById('renameFolderModal').classList.remove('show');
+        }
+        
+        async function saveRenameFolder() {
+            const oldPath = document.getElementById('modalRenameFolderPath').value;
+            const newName = document.getElementById('modalRenameFolderNewName').value.trim();
+            
+            if (!newName) {
+                showMessage('请输入新名称', 'error');
+                return;
+            }
+            
+            try {
+                await axios.post(`${API_BASE}/api/corpus/folder/rename`, {
+                    old_path: oldPath,
+                    new_name: newName
+                });
+                showMessage('文件夹重命名成功', 'success');
+                closeRenameFolderModal();
+                loadCorpusList();
+            } catch (error) {
+                showMessage('重命名失败: ' + (error.response?.data?.detail || error.message), 'error');
+            }
+        }
+        
+        async function deleteFolderConfirm(folderPath, folderName) {
+            if (confirm(`确定要删除文件夹 "${folderName}" 吗？\n\n注意：删除文件夹会同时删除其内部所有内容，此操作不可恢复！`)) {
+                try {
+                    await axios.post(`${API_BASE}/api/corpus/folder/delete`, {
+                        folder_path: folderPath
+                    });
+                    showMessage('文件夹删除成功', 'success');
+                    loadCorpusList();
+                } catch (error) {
+                    showMessage('删除失败: ' + (error.response?.data?.detail || error.message), 'error');
+                }
+            }
+        }
+        
+        // Schema文件夹和文件选择
+        async function loadSchemaAndPromptOptions() {
+            try {
+                // 加载Schema文件夹
+                const schemaFolderSelect = document.getElementById('generateSchemaFolder');
+                if (schemaFolderSelect) {
+                    const foldersResponse = await axios.get(`${API_BASE}/api/schemas/folders`);
+                    const folders = foldersResponse.data.folders || [];
+                    schemaFolderSelect.innerHTML = '<option value="">根目录</option>';
+                    folders.forEach(folder => {
+                        const option = document.createElement('option');
+                        option.value = folder.name;
+                        option.textContent = folder.name;
+                        schemaFolderSelect.appendChild(option);
+                    });
+                    // 加载根目录的schema
+                    await onSchemaFolderChange();
+                }
+                
+                // 加载Prompt文件夹（staged prompts）
+                const promptFolderSelect = document.getElementById('generatePromptFolder');
+                if (promptFolderSelect) {
+                    const stagedResponse = await axios.get(`${API_BASE}/api/prompts/staged`);
+                    const folders = stagedResponse.data.staged_prompts || [];
+                    promptFolderSelect.innerHTML = '<option value="">请选择</option>';
+                    folders.forEach(folder => {
+                        const option = document.createElement('option');
+                        option.value = folder;
+                        option.textContent = folder;
+                        promptFolderSelect.appendChild(option);
+                    });
+                }
+                
+                // 加载单个Prompt文件（根目录）
+                const promptFileSelect = document.getElementById('generatePromptFile');
+                if (promptFileSelect) {
+                    const promptResponse = await axios.get(`${API_BASE}/api/prompts`);
+                    const prompts = promptResponse.data.prompts || [];
+                    promptFileSelect.innerHTML = '<option value="">请选择</option>';
+                    prompts.forEach(prompt => {
+                        const option = document.createElement('option');
+                        option.value = prompt;
+                        option.textContent = prompt + (prompt === 'electrolytes' ? ' (默认)' : '');
+                        promptFileSelect.appendChild(option);
+                    });
+                }
+            } catch (error) {
+                console.error('加载选项失败', error);
+            }
+        }
+        
+        async function onSchemaFolderChange() {
+            const folderSelect = document.getElementById('generateSchemaFolder');
+            const schemaList = document.getElementById('generateSchemaList');
+            if (!folderSelect || !schemaList) return;
+            
+            const folderName = folderSelect.value;
+            
+            try {
+                let schemas = [];
+                if (folderName) {
+                    const response = await axios.get(`${API_BASE}/api/schemas/folder/${encodeURIComponent(folderName)}`);
+                    schemas = response.data.schemas || [];
+                } else {
+                    const response = await axios.get(`${API_BASE}/api/schemas`);
+                    schemas = response.data.schemas || [];
+                }
+                
+                if (schemas.length === 0) {
+                    schemaList.innerHTML = '<div style="color: #909399; font-size: 13px;">该文件夹下没有schema文件</div>';
+                    return;
+                }
+                
+                schemaList.innerHTML = schemas.map(schema => `
+                    <label style="display: flex; align-items: center; gap: 8px; padding: 6px 0; cursor: pointer;">
+                        <input type="checkbox" name="schemaCheckbox" value="${folderName ? folderName + '/' + schema : schema}" style="width: auto;">
+                        <span>${schema}${schema === 'electrolytes' && !folderName ? ' (默认)' : ''}</span>
+                    </label>
+                `).join('');
+            } catch (error) {
+                schemaList.innerHTML = '<div style="color: #f56c6c; font-size: 13px;">加载失败</div>';
+            }
+        }
+        
+        async function onPromptTypeChange() {
+            const typeSelect = document.getElementById('generatePromptType');
+            const folderSection = document.getElementById('promptFolderSection');
+            const fileSection = document.getElementById('promptFileSection');
+            if (!typeSelect) return;
+            
+            const type = typeSelect.value;
+            
+            if (type === 'folder') {
+                folderSection.style.display = 'block';
+                fileSection.style.display = 'none';
+            } else if (type === 'file') {
+                folderSection.style.display = 'none';
+                fileSection.style.display = 'block';
+            } else {
+                folderSection.style.display = 'none';
+                fileSection.style.display = 'none';
+            }
+        }
+        
+        async function onSchemaFolderChange() {
+            const folderSelect = document.getElementById('generateSchemaFolder');
+            const schemaList = document.getElementById('generateSchemaList');
+            if (!folderSelect || !schemaList) return;
+            
+            const folderName = folderSelect.value;
+            
+            try {
+                let schemas = [];
+                if (folderName) {
+                    const response = await axios.get(`${API_BASE}/api/schemas/folder/${encodeURIComponent(folderName)}`);
+                    schemas = response.data.schemas || [];
+                } else {
+                    const response = await axios.get(`${API_BASE}/api/schemas`);
+                    schemas = response.data.schemas || [];
+                }
+                
+                if (schemas.length === 0) {
+                    schemaList.innerHTML = '<div style="color: #909399; font-size: 13px;">该文件夹下没有schema文件</div>';
+                    return;
+                }
+                
+                schemaList.innerHTML = schemas.map(schema => `
+                    <label style="display: flex; align-items: center; gap: 8px; padding: 6px 0; cursor: pointer;">
+                        <input type="checkbox" name="schemaCheckbox" value="${folderName ? folderName + '/' + schema : schema}" style="width: auto;">
+                        <span>${schema}${schema === 'electrolytes' && !folderName ? ' (默认)' : ''}</span>
+                    </label>
+                `).join('');
+            } catch (error) {
+                schemaList.innerHTML = '<div style="color: #f56c6c; font-size: 13px;">加载失败</div>';
+            }
+        }
+
+        async function loadStageExampleStyles() {
+            const stage1Select = document.getElementById('stage1StyleSelect');
+            const stage2Select = document.getElementById('stage2StyleSelect');
+            if (!stage1Select || !stage2Select) return;
+
+            try {
+                const response = await axios.get(`${API_BASE}/api/stage-examples`, { timeout: 8000 });
+                const data = response.data || {};
+                const stage1Styles = Array.isArray(data['参数1']) ? data['参数1'] : [];
+                const stage2Styles = Array.isArray(data['参数2']) ? data['参数2'] : [];
+
+                stage1Select.innerHTML = '';
+                stage2Select.innerHTML = '';
+
+                // 添加不选择风格选项
+                const noStyle1 = document.createElement('option');
+                noStyle1.value = '';
+                noStyle1.textContent = '不选择风格';
+                stage1Select.appendChild(noStyle1);
+
+                stage1Styles.forEach(styleName => {
+                    const opt = document.createElement('option');
+                    opt.value = styleName;
+                    opt.textContent = styleName;
+                    stage1Select.appendChild(opt);
+                });
+
+                const noStyle2 = document.createElement('option');
+                noStyle2.value = '';
+                noStyle2.textContent = '不选择风格';
+                stage2Select.appendChild(noStyle2);
+
+                stage2Styles.forEach(styleName => {
+                    const opt = document.createElement('option');
+                    opt.value = styleName;
+                    opt.textContent = styleName;
+                    stage2Select.appendChild(opt);
+                });
+
+                // 默认选中第一个真实风格选项（index=1，跳过不选择风格）
+                if (stage1Select.options.length > 1) stage1Select.selectedIndex = 1;
+                if (stage2Select.options.length > 1) stage2Select.selectedIndex = 1;
+            } catch (error) {
+                showMessage('加载 Stage 风格选项失败：' + (error.response?.data?.detail || error.message), 'error');
+                stage1Select.innerHTML = '';
+                stage2Select.innerHTML = '';
+                const fail1 = document.createElement('option');
+                fail1.value = '';
+                fail1.textContent = '加载失败，请刷新页面';
+                stage1Select.appendChild(fail1);
+                const fail2 = document.createElement('option');
+                fail2.value = '';
+                fail2.textContent = '加载失败，请刷新页面';
+                stage2Select.appendChild(fail2);
+            }
+        }
+        
+        async function generateGraph() {
+            const datasetName = document.getElementById('generateDatasetName').value.trim();
+            if (!datasetName) {
+                showMessage('请选择数据集', 'error');
+                return;
+            }
+
+            const sessionId = getOrCreateSessionId();
+
+            startGenerateProgress();
+
+            try {
+                const payload = {
+                    dataset_name: datasetName,
+                    session_id: sessionId
+                };
+
+                // 添加输出名称
+                const outputName = document.getElementById('outputName')?.value?.trim();
+                if (outputName) payload.output_name = outputName;
+
+                // 添加输出模式选项
+                const outputMode = document.querySelector('input[name="outputMode"]:checked')?.value || 'balanced';
+                payload.output_mode = outputMode;
+
+                // 添加Schema配置（多选）
+                const checkedSchemas = document.querySelectorAll('input[name="schemaCheckbox"]:checked');
+                if (checkedSchemas.length > 0) {
+                    payload.schema_name = checkedSchemas[0].value;
+                }
+
+                // 添加Prompt配置
+                const promptType = document.getElementById('generatePromptType')?.value;
+                if (promptType === 'folder') {
+                    const promptFolder = document.getElementById('generatePromptFolder')?.value?.trim();
+                    if (promptFolder) payload.prompt_folder = promptFolder;
+                } else if (promptType === 'file') {
+                    const promptFile = document.getElementById('generatePromptFile')?.value?.trim();
+                    if (promptFile) payload.prompt_folder = promptFile;
+                }
+
+                const stage1Style = document.getElementById('stage1StyleSelect')?.value?.trim();
+                const stage2Style = document.getElementById('stage2StyleSelect')?.value?.trim();
+                if (stage1Style) payload.stage1_style = stage1Style;
+                if (stage2Style) payload.stage2_style = stage2Style;
+                const stage1Override = document.getElementById('stage1ExamplesOverride')?.value?.trim();
+                const stage2Override = document.getElementById('stage2ExamplesOverride')?.value?.trim();
+                if (stage1Override) payload.user_design_stage1_style = stage1Override;
+                if (stage2Override) payload.user_design_stage2_style = stage2Override;
+
+                const response = await axios.post(`${API_BASE}/api/tune_prompt_mixed`, payload);
+                const resData = response.data || {};
+
+                if (resData.status === 'running') {
+                    // 后端已启动后台任务，保存数据集名称并开始轮询
+                    localStorage.setItem('generating_dataset', datasetName);
+                    startPolling(sessionId);
+                    showMessage('图谱生成任务已启动，可以切换页面，进度不会丢失', 'success');
+                } else {
+                    // 兼容：如果后端直接返回了完整结果
+                    stopGenerateProgress(true);
+                    hideGenerateProgress();
+                    const datasetLabel = datasetName || '未知';
+                    const filesInfo = (resData.graph_files || []).join(', ') || '生成完成';
+                    document.getElementById('generateCompleteInfo').innerHTML =
+                        '数据集: <strong>' + datasetLabel + '</strong><br>' +
+                        '生成文件: ' + filesInfo;
+                    window._generateCompleteDataset = datasetLabel;
+                    window._generateCompleteTimestamp = resData.time_now || '';
+                    document.getElementById('generateCompleteModal').classList.add('show');
+                }
+
+            } catch (error) {
+                if (axios.isCancel && axios.isCancel(error)) return;
+                stopGenerateProgress(false);
+                hideGenerateProgress();
+                showMessage('生成失败: ' + (error.response?.data?.detail || error.message), 'error');
+            }
+        }
+
+        function closeGenerateCompleteModal() {
+            document.getElementById('generateCompleteModal').classList.remove('show');
+        }
+
+        function goToVisualization() {
+            const dataset = window._generateCompleteDataset || '';
+            const timestamp = window._generateCompleteTimestamp || '';
+            let url = 'index.html';
+            if (dataset) {
+                url += '?dataset=' + encodeURIComponent(dataset);
+                if (timestamp) {
+                    url += '&timestamp=' + encodeURIComponent(timestamp);
+                }
+            }
+            window.location.href = url;
+        }
+    </script>
+    <script>
+        // 输出模式提示文本切换
+        document.querySelectorAll('input[name="outputMode"]').forEach(function(radio) {
+            radio.addEventListener('change', function() {
+                var hint = document.getElementById('outputModeHint');
+                if (!hint) return;
+                var hints = {
+                    'full': '全部功能开启，耗时最长',
+                    'balanced': '不损失图谱质量，跳过后处理分析',
+                    'simple': '最快速度，可能损失部分图谱质量'
+                };
+                hint.textContent = hints[this.value] || '';
+            });
+        });
+    </script>
+</body>
+</html>
+
+

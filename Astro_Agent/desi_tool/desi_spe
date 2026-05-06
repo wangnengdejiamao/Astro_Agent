@@ -1,0 +1,556 @@
+#!/usr/bin/env python3
+"""
+DESI 光谱获取与抽取工具
+========================
+从输入的 RA/DEC 坐标自动：
+1. 在 mws_gaia.csv 中匹配找到 TARGETID
+2. 下载对应的 coadd 文件（如需要）
+3. 提取并绘制光谱
+4. 保存光谱数据
+
+使用方法:
+    ./desi_spe --ra 132.832904 --dec 11.811326
+    
+    或使用 Python API:
+    from desi_spe import extract_spectrum_by_coords
+    extract_spectrum_by_coords(132.832904, 11.811326, output_dir='./spectra')
+"""
+
+import pandas as pd
+import numpy as np
+from astropy.io import fits
+from astropy.coordinates import SkyCoord
+from astropy import units as u
+import matplotlib.pyplot as plt
+import os
+import sys
+import argparse
+import requests
+from tqdm import tqdm
+import warnings
+
+warnings.filterwarnings('ignore')
+
+# ============ 配置 ============
+CSV_PATH = 'mws_gaia.csv'
+CACHE_DIR = './coadd_cache'
+OUTPUT_DIR = './spectra_output'
+BASE_URL = "https://data.desi.lbl.gov/public/dr1/spectro/redux/iron/healpix"
+MATCH_RADIUS_ARCSEC = 5.0  # 匹配半径（角秒）
+
+
+# ============ 核心功能 ============
+
+def find_target_by_coords(ra, dec, csv_path=CSV_PATH, tol_arcsec=MATCH_RADIUS_ARCSEC):
+    """
+    通过坐标在 mws_gaia.csv 中查找目标
+    
+    Parameters:
+    -----------
+    ra, dec : float
+        目标坐标（度）
+    csv_path : str
+        星表文件路径
+    tol_arcsec : float
+        匹配半径（角秒）
+        
+    Returns:
+    --------
+    dict or None
+        匹配到的源信息，未匹配返回 None
+    """
+    if not os.path.exists(csv_path):
+        print(f"错误: 找不到星表文件 {csv_path}")
+        return None
+    
+    print(f"正在加载星表: {csv_path}")
+    df = pd.read_csv(csv_path)
+    print(f"  星表共 {len(df):,} 个源")
+    
+    # 创建 SkyCoord 对象
+    catalog_coords = SkyCoord(ra=df['RA'].values*u.deg, dec=df['DEC'].values*u.deg)
+    target_coord = SkyCoord(ra=ra*u.deg, dec=dec*u.deg)
+    
+    # 执行匹配
+    idx, sep2d, _ = target_coord.match_to_catalog_sky(catalog_coords)
+    sep_arcsec = float(sep2d.to(u.arcsec).value)
+    
+    print(f"\n坐标匹配:")
+    print(f"  输入坐标: RA={ra:.6f}, DEC={dec:.6f}")
+    print(f"  最近源距离: {sep_arcsec:.4f} 角秒")
+    
+    if sep_arcsec > tol_arcsec:
+        print(f"  未找到匹配（阈值: {tol_arcsec} 角秒）")
+        return None
+    
+    # 获取匹配结果 (处理 numpy 标量情况)
+    try:
+        match_row = df.iloc[idx]
+    except (IndexError, TypeError):
+        # idx 可能是 numpy scalar
+        match_row = df.iloc[int(idx)]
+    
+    result = {
+        'targetid': int(match_row['TARGETID']),
+        'ra': float(match_row['RA']),
+        'dec': float(match_row['DEC']),
+        'survey': match_row['SURVEY'],
+        'program': match_row['PROGRAM'],
+        'healpix': int(match_row['HEALPIX']),
+        'vrad': float(match_row['VRAD']) if pd.notna(match_row['VRAD']) else None,
+        'teff': float(match_row['TEFF']) if pd.notna(match_row['TEFF']) else None,
+        'logg': float(match_row['LOGG']) if pd.notna(match_row['LOGG']) else None,
+        'feh': float(match_row['FEH']) if pd.notna(match_row['FEH']) else None,
+        'separation_arcsec': sep_arcsec,
+        'match_row': match_row
+    }
+    
+    print(f"  ✓ 匹配成功!")
+    print(f"    TARGETID: {result['targetid']}")
+    print(f"    SURVEY: {result['survey']}, PROGRAM: {result['program']}")
+    print(f"    HEALPIX: {result['healpix']}")
+    
+    return result
+
+
+def get_healpix_url(survey, program, healpix):
+    """生成 coadd 文件 URL"""
+    # HEALPIX 分组目录
+    healpix_group = healpix // 100
+    filename = f"coadd-{survey}-{program}-{healpix}.fits"
+    url = f"{BASE_URL}/{survey}/{program}/{healpix_group}/{healpix}/{filename}"
+    return url, filename
+
+
+def download_file(url, output_path, timeout=120):
+    """
+    下载文件并显示进度条
+    
+    Returns:
+        bool: 下载是否成功
+    """
+    try:
+        response = requests.get(url, stream=True, timeout=timeout)
+        response.raise_for_status()
+        
+        total_size = int(response.headers.get('content-length', 0))
+        
+        with open(output_path, 'wb') as f, tqdm(
+            desc=os.path.basename(output_path),
+            total=total_size,
+            unit='B',
+            unit_scale=True,
+            unit_divisor=1024,
+        ) as pbar:
+            for chunk in response.iter_content(chunk_size=8192):
+                if chunk:
+                    f.write(chunk)
+                    pbar.update(len(chunk))
+        
+        return True
+        
+    except Exception as e:
+        print(f"  下载失败: {e}")
+        if os.path.exists(output_path):
+            os.remove(output_path)
+        return False
+
+
+def get_coadd_file(survey, program, healpix, cache_dir=CACHE_DIR):
+    """
+    获取 coadd 文件（下载或从缓存读取）
+    
+    Returns:
+        str: 本地文件路径，失败返回 None
+    """
+    os.makedirs(cache_dir, exist_ok=True)
+    
+    url, filename = get_healpix_url(survey, program, healpix)
+    local_path = os.path.join(cache_dir, filename)
+    
+    # 检查缓存
+    if os.path.exists(local_path):
+        print(f"  使用缓存: {local_path}")
+        return local_path
+    
+    # 下载
+    print(f"  下载 coadd 文件...")
+    print(f"    URL: {url}")
+    
+    if download_file(url, local_path):
+        print(f"  ✓ 下载完成")
+        return local_path
+    else:
+        return None
+
+
+def extract_spectrum_from_coadd(coadd_path, targetid):
+    """
+    从 coadd 文件中提取特定 TARGETID 的光谱
+    
+    DESI coadd 文件结构:
+    - HDU1: FIBERMAP - 光纤映射表
+    - HDU2-4: B/R/Z 波段波长
+    - HDU5-10: B/R/Z 波段流量和逆方差
+    
+    Returns:
+        dict: 光谱数据，失败返回 None
+    """
+    try:
+        with fits.open(coadd_path) as hdul:
+            # 读取 FIBERMAP
+            fibermap = hdul['FIBERMAP'].data
+            targetids = fibermap['TARGETID']
+            
+            # 查找目标索引
+            idx = np.where(targetids == targetid)[0]
+            if len(idx) == 0:
+                print(f"  错误: TARGETID {targetid} 不在文件中!")
+                return None
+            idx = idx[0]
+            
+            # 提取光谱数据
+            spectrum = {
+                'targetid': targetid,
+                'index_in_fibermap': idx,
+                'ra': float(fibermap['TARGET_RA'][idx]),
+                'dec': float(fibermap['TARGET_DEC'][idx]),
+                'fiberstatus': int(fibermap['COADD_FIBERSTATUS'][idx]) if 'COADD_FIBERSTATUS' in fibermap.columns.names else None,
+                'B': {
+                    'wavelength': hdul['B_WAVELENGTH'].data.copy(),
+                    'flux': hdul['B_FLUX'].data[idx].copy(),
+                    'error': 1.0 / np.sqrt(hdul['B_IVAR'].data[idx] + 1e-10)
+                },
+                'R': {
+                    'wavelength': hdul['R_WAVELENGTH'].data.copy(),
+                    'flux': hdul['R_FLUX'].data[idx].copy(),
+                    'error': 1.0 / np.sqrt(hdul['R_IVAR'].data[idx] + 1e-10)
+                },
+                'Z': {
+                    'wavelength': hdul['Z_WAVELENGTH'].data.copy(),
+                    'flux': hdul['Z_FLUX'].data[idx].copy(),
+                    'error': 1.0 / np.sqrt(hdul['Z_IVAR'].data[idx] + 1e-10)
+                }
+            }
+            
+            return spectrum
+            
+    except Exception as e:
+        print(f"  提取光谱时出错: {e}")
+        return None
+
+
+def plot_spectrum(spectrum, target_info=None, save_path=None, show=True):
+    """
+    绘制光谱图
+    
+    Parameters:
+    -----------
+    spectrum : dict
+        光谱数据
+    target_info : dict
+        目标信息（用于显示）
+    save_path : str
+        保存路径
+    show : bool
+        是否显示图像
+    """
+    targetid = spectrum['targetid']
+    ra = spectrum['ra']
+    dec = spectrum['dec']
+    
+    # 创建图形
+    fig, axes = plt.subplots(2, 1, figsize=(14, 8), 
+                             gridspec_kw={'height_ratios': [3, 1]})
+    
+    # ========== 主图：光谱 ==========
+    ax1 = axes[0]
+    
+    # 绘制三个波段
+    ax1.plot(spectrum['B']['wavelength'], spectrum['B']['flux'], 
+             'b-', label='B band (3600-5800 Å)', linewidth=0.8, alpha=0.8)
+    ax1.plot(spectrum['R']['wavelength'], spectrum['R']['flux'], 
+             'g-', label='R band (5800-7600 Å)', linewidth=0.8, alpha=0.8)
+    ax1.plot(spectrum['Z']['wavelength'], spectrum['Z']['flux'], 
+             'r-', label='Z band (7600-9800 Å)', linewidth=0.8, alpha=0.8)
+    
+    # 添加误差阴影
+    ax1.fill_between(spectrum['B']['wavelength'], 
+                     spectrum['B']['flux'] - spectrum['B']['error'],
+                     spectrum['B']['flux'] + spectrum['B']['error'],
+                     color='blue', alpha=0.15)
+    ax1.fill_between(spectrum['R']['wavelength'], 
+                     spectrum['R']['flux'] - spectrum['R']['error'],
+                     spectrum['R']['flux'] + spectrum['R']['error'],
+                     color='green', alpha=0.15)
+    ax1.fill_between(spectrum['Z']['wavelength'], 
+                     spectrum['Z']['flux'] - spectrum['Z']['error'],
+                     spectrum['Z']['flux'] + spectrum['Z']['error'],
+                     color='red', alpha=0.15)
+    
+    ax1.set_xlabel('Wavelength (Å)', fontsize=12)
+    ax1.set_ylabel('Flux (10⁻¹⁷ erg/s/cm²/Å)', fontsize=12)
+    
+    # 标题
+    title = f'DESI Spectrum - TARGETID: {targetid}'
+    if target_info:
+        fiber_info = f', FiberStatus={spectrum["fiberstatus"]}' if spectrum.get('fiberstatus') is not None else ''
+        title += f'\nRA={ra:.6f}, DEC={dec:.6f}{fiber_info}'
+        if target_info.get('teff'):
+            title += f', Teff={target_info["teff"]:.0f}K'
+    ax1.set_title(title, fontsize=12)
+    ax1.legend(loc='upper right', fontsize=10)
+    ax1.grid(True, alpha=0.3)
+    
+    # 标注重要谱线
+    spectral_lines = {
+        3933: 'Ca II K',
+        3968: 'Ca II H',
+        4861: 'Hβ',
+        5175: 'Mg b',
+        5890: 'Na D',
+        6563: 'Hα',
+        8500: 'Ca II IR',
+    }
+    
+    ylim = ax1.get_ylim()
+    for wave, name in spectral_lines.items():
+        if 3600 <= wave <= 9800:
+            ax1.axvline(wave, color='gray', linestyle='--', alpha=0.5, linewidth=0.5)
+            ax1.text(wave, ylim[1]*0.95, name, 
+                    rotation=90, fontsize=8, ha='right', va='top')
+    
+    # ========== 子图：信噪比 ==========
+    ax2 = axes[1]
+    
+    sn_b = spectrum['B']['flux'] / spectrum['B']['error']
+    sn_r = spectrum['R']['flux'] / spectrum['R']['error']
+    sn_z = spectrum['Z']['flux'] / spectrum['Z']['error']
+    
+    ax2.plot(spectrum['B']['wavelength'], sn_b, 'b-', linewidth=0.5, alpha=0.7)
+    ax2.plot(spectrum['R']['wavelength'], sn_r, 'g-', linewidth=0.5, alpha=0.7)
+    ax2.plot(spectrum['Z']['wavelength'], sn_z, 'r-', linewidth=0.5, alpha=0.7)
+    
+    ax2.set_xlabel('Wavelength (Å)', fontsize=12)
+    ax2.set_ylabel('S/N', fontsize=12)
+    ax2.set_title('Signal-to-Noise Ratio', fontsize=11)
+    ax2.grid(True, alpha=0.3)
+    ax2.axhline(y=0, color='k', linestyle='-', linewidth=0.5)
+    
+    # S/N 统计
+    median_sn_b = np.median(sn_b)
+    median_sn_r = np.median(sn_r)
+    median_sn_z = np.median(sn_z)
+    
+    info_text = f"Median S/N: B={median_sn_b:.1f}, R={median_sn_r:.1f}, Z={median_sn_z:.1f}"
+    ax2.text(0.02, 0.95, info_text, transform=ax2.transAxes, fontsize=10,
+             verticalalignment='top', bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.5))
+    
+    plt.tight_layout()
+    
+    if save_path:
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        print(f"\n✓ 光谱图已保存: {save_path}")
+    
+    if show:
+        plt.show()
+    
+    return fig
+
+
+def save_spectrum_to_fits(spectrum, target_info, output_path):
+    """
+    将光谱保存为 FITS 文件
+    
+    Returns:
+        bool: 保存是否成功
+    """
+    try:
+        hdul = fits.HDUList()
+        
+        # Primary HDU - 元数据
+        header = fits.Header()
+        header['TARGETID'] = spectrum['targetid']
+        header['RA'] = spectrum['ra']
+        header['DEC'] = spectrum['dec']
+        if spectrum.get('fiberstatus') is not None:
+            header['FIBERSTA'] = spectrum['fiberstatus']
+        
+        if target_info:
+            header['SURVEY'] = target_info.get('survey', '')
+            header['PROGRAM'] = target_info.get('program', '')
+            if target_info.get('vrad') is not None:
+                header['VRAD'] = target_info['vrad']
+            if target_info.get('teff') is not None:
+                header['TEFF'] = target_info['teff']
+            if target_info.get('logg') is not None:
+                header['LOGG'] = target_info['logg']
+            if target_info.get('feh') is not None:
+                header['FEH'] = target_info['feh']
+        
+        header['COMMENT'] = 'DESI DR1 Spectrum extracted by desi_spe'
+        hdul.append(fits.PrimaryHDU(header=header))
+        
+        # B 波段
+        b_data = np.array([spectrum['B']['wavelength'],
+                           spectrum['B']['flux'],
+                           spectrum['B']['error']])
+        hdul.append(fits.ImageHDU(data=b_data, name='B_BAND'))
+        
+        # R 波段
+        r_data = np.array([spectrum['R']['wavelength'],
+                           spectrum['R']['flux'],
+                           spectrum['R']['error']])
+        hdul.append(fits.ImageHDU(data=r_data, name='R_BAND'))
+        
+        # Z 波段
+        z_data = np.array([spectrum['Z']['wavelength'],
+                           spectrum['Z']['flux'],
+                           spectrum['Z']['error']])
+        hdul.append(fits.ImageHDU(data=z_data, name='Z_BAND'))
+        
+        hdul.writeto(output_path, overwrite=True)
+        print(f"✓ 光谱数据已保存: {output_path}")
+        return True
+        
+    except Exception as e:
+        print(f"  保存 FITS 时出错: {e}")
+        return False
+
+
+def extract_spectrum_by_coords(ra, dec, output_dir=OUTPUT_DIR, 
+                                show_plot=True, save_fits=True,
+                                csv_path=CSV_PATH, match_radius=MATCH_RADIUS_ARCSEC):
+    """
+    主函数：通过坐标提取 DESI 光谱
+    
+    Parameters:
+    -----------
+    ra, dec : float
+        目标坐标（度）
+    output_dir : str
+        输出目录
+    show_plot : bool
+        是否显示图像
+    save_fits : bool
+        是否保存 FITS 文件
+        
+    Returns:
+    --------
+    dict or None
+        光谱数据，失败返回 None
+    """
+    print("="*70)
+    print("DESI 光谱提取工具")
+    print("="*70)
+    
+    # 1. 查找目标
+    print("\n[1/4] 坐标匹配...")
+    target_info = find_target_by_coords(ra, dec, csv_path, match_radius)
+    if target_info is None:
+        print("\n✗ 未找到匹配源")
+        return None
+    
+    # 2. 获取 coadd 文件
+    print("\n[2/4] 获取 coadd 文件...")
+    coadd_path = get_coadd_file(
+        target_info['survey'],
+        target_info['program'],
+        target_info['healpix']
+    )
+    
+    if coadd_path is None:
+        print("\n✗ 无法获取 coadd 文件")
+        return None
+    
+    # 3. 提取光谱
+    print("\n[3/4] 提取光谱...")
+    spectrum = extract_spectrum_from_coadd(coadd_path, target_info['targetid'])
+    
+    if spectrum is None:
+        print("\n✗ 光谱提取失败")
+        return None
+    
+    print(f"  ✓ 光谱提取成功")
+    print(f"    B波段: {len(spectrum['B']['wavelength'])} 像素")
+    print(f"    R波段: {len(spectrum['R']['wavelength'])} 像素")
+    print(f"    Z波段: {len(spectrum['Z']['wavelength'])} 像素")
+    
+    # 4. 保存和绘图
+    print("\n[4/4] 保存结果...")
+    os.makedirs(output_dir, exist_ok=True)
+    
+    targetid = target_info['targetid']
+    
+    # 保存 FITS
+    if save_fits:
+        fits_path = os.path.join(output_dir, f"spectrum_{targetid}.fits")
+        save_spectrum_to_fits(spectrum, target_info, fits_path)
+    
+    # 绘制光谱
+    plot_path = os.path.join(output_dir, f"spectrum_{targetid}.png")
+    plot_spectrum(spectrum, target_info, save_path=plot_path, show=show_plot)
+    
+    print("\n" + "="*70)
+    print("完成!")
+    print("="*70)
+    print(f"\n输出文件:")
+    if save_fits:
+        print(f"  FITS: {os.path.join(output_dir, f'spectrum_{targetid}.fits')}")
+    print(f"  PNG:  {plot_path}")
+    
+    return spectrum
+
+
+# ============ 命令行入口 ============
+
+def main():
+    parser = argparse.ArgumentParser(
+        description='DESI 光谱获取与抽取工具',
+        formatter_class=argparse.RawDescriptionHelpFormatter,
+        epilog="""
+示例:
+  %(prog)s --ra 132.832904 --dec 11.811326
+  %(prog)s --ra 15.793477 --dec 17.959918 --output ./my_spectra
+  %(prog)s --ra 132.832904 --dec 11.811326 --no-show
+        """
+    )
+    
+    parser.add_argument('--ra', type=float, required=True,
+                       help='目标赤经 (度)')
+    parser.add_argument('--dec', type=float, required=True,
+                       help='目标赤纬 (度)')
+    parser.add_argument('--output', '-o', default=OUTPUT_DIR,
+                       help=f'输出目录 (默认: {OUTPUT_DIR})')
+    parser.add_argument('--no-show', action='store_true',
+                       help='不显示图像，只保存')
+    parser.add_argument('--no-fits', action='store_true',
+                       help='不保存 FITS 文件，只保存图像')
+    parser.add_argument('--match-radius', type=float, default=MATCH_RADIUS_ARCSEC,
+                       help=f'坐标匹配半径 (角秒，默认: {MATCH_RADIUS_ARCSEC})')
+    parser.add_argument('--csv', default=CSV_PATH,
+                       help=f'星表文件路径 (默认: {CSV_PATH})')
+    
+    args = parser.parse_args()
+    
+    # 更新配置
+    csv_path = args.csv
+    match_radius = args.match_radius
+    
+    # 执行提取
+    spectrum = extract_spectrum_by_coords(
+        ra=args.ra,
+        dec=args.dec,
+        output_dir=args.output,
+        show_plot=not args.no_show,
+        save_fits=not args.no_fits,
+        csv_path=csv_path,
+        match_radius=match_radius
+    )
+    
+    if spectrum is None:
+        sys.exit(1)
+
+
+if __name__ == "__main__":
+    main()

@@ -1,0 +1,51 @@
+You are a research scientist specializing in battery materials and electrochemistry.
+Your task is to meticulously analyze the provided scientific text about battery electrolytes and extract key chemical compounds, materials, properties, and their relationships.
+The goal is to build a structured knowledge graph for materials discovery.
+**CRITICAL FORMATTING RULES (Must be followed):**
+1.  **JSON Only:** Return ONLY a raw JSON object containing "attributes", "triples", and "entity_types".
+2.  **Triple Format:** All triples *must* be a 3-element list `[subject, relation, object]`. All 3 elements *must* be strings.
+    -   Correct: `["Li-ion", "exhibits", "high energy density"]`
+    -   WRONG: `["Li-ion", "exhibits"]` (Missing object)
+    -   WRONG: `[["Li-ion"], "exhibits", "high energy density"]` (Subject is a list, not a string)
+3.  **Attribute Format:** Attributes *must* be strings in `"key: value"` format (e.g., `"value: 8.5"`, `"units: mS/cm"`).
+4.  **Entity Consistency:** Entity names must be identical across `attributes` keys, all `triples`, and the `entity_types` keys.
+
+**Guidelines for Extraction:**
+1. Strictly adhere to the provided schema for extraction.
+```{schema}```
+2. Extract entities such as specific chemical compounds, solvents, salts, additives, and the properties they exhibit (e.g., ionic conductivity, electrochemical window).
+3. Extract relationships like a compound improving a performance metric, an electrolyte being composed of certain chemicals, or a property being measured by a specific test method.
+4. Pay close attention to numerical data. Extract property values and their units as attributes.
+5. Avoid redundant attributes: do NOT repeat the entity name/schema type as an attribute value (e.g., "description: salt" for entity "Salt"); descriptions must add new information.
+
+Text Chunk:
+    ```{chunk}```
+
+Example Input and Output:
+
+Input Text Chunk:
+
+"Regulating dissolution chemistry of nitrates in carbonate electrolyte for high-stable lithium metal batteries", "text": "To solve the above problems, extensive efforts have been made in\r\nprotecting LMA, such as artificial SEI engineering , mechanical\r\nconfinement , and optimization of electrolytes , among\r\nwhich the most effective method is to optimize electrolytes to form\r\nstable SEI on LMA. It is well-known that ${LiNO}_{3}$ is the most\r\ncommonly used additive in ether-based electrolytes\r\n\r\nbecause ${NO}_{3}^{-}$ participates in the solvation shell of $Li^{+}$\r\nto form an inorganic-rich SEI that inhibits the growth of lithium\r\ndendrites . However, the solubility of most nitrates in\r\ncarbonate electrolytes is rather limited ( $\\sim 800$ ppm for\r\n${LiNO}_{3}$ ) . There are many methods reported to improve the\r\nsolubility of nitrates, such as introducing a solvent with a high donor\r\nnumber (DN) as a solubilizer or Lewis acid as an electron-rich\r\n${NO}_{3}^{-}$ acceptor to break up ${LiNO}_{3}$ clusters .\r\nHowever, it is costly to search for a suitable solubilizer with the\r\nincreased complexity of the operation."
+
+Output:
+    {{
+        "attributes": {{
+         "LiNO3": [ "solubility: ~800 ppm", "solubility_medium: carbonate electrolytes"],
+        "solubility of nitrates": ["description: solubility of most nitrates"] }},
+        "triples": [
+        ["LiNO3", "is_additive_in", "ether-based electrolytes"],
+        [""NO3-
+", "participates_in", "solvation shell of Li+"],
+        ["solubility of nitrates", "is_improved_by", "introducing a solvent with a high donor number"]
+        ],
+        "entity_types": {{
+        "LiNO3": "ChemicalCompound",
+        "ether-based electrolytes": "Electrolyte",
+        "NO3-": "ChemicalCompound",
+        "solvation shell of Li+": "ChemicalStructure",
+        "solubility of nitrates": "Property",
+        "introducing a solvent with a high donor number": "Method",
+        "Lewis acid as an electron-rich NO3- acceptor": "ChemicalRole",
+        "carbonate electrolytes": "Electrolyte"
+        
+}}

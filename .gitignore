@@ -1,0 +1,68 @@
+# Secrets and local runtime
+.env
+**/.env
+.codex
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+.venv/
+venv/
+env/
+node_modules/
+
+# Logs and temporary files
+*.log
+*.tmp
+*.bak
+*.zip
+main-*.js
+texput.log
+retry.log
+retry_classify.log
+verify.log
+
+# Large astronomy data and generated artifacts
+*.sqlite
+*.sqlite3
+*.db
+*.fits
+*.fit
+*.fts
+*.h5
+*.hdf5
+*.pkl
+*.pickle
+*.parquet
+*.pdf
+*.pptx
+
+# Local literature corpus and downloaded papers
+literature/pdfs/
+literature/ads_complete_*/
+literature/**/*.pdf
+
+# RAG indexes and generated graph outputs
+rag_pipeline/index/
+rag_pipeline/cache/
+prompt2graph_for_astronomy/output/
+prompt2graph_for_astronomy/cache/
+prompt2graph_for_astronomy/**/*.sqlite
+prompt2graph_for_astronomy/**/*.jsonl
+
+# Astro Agent generated data
+Astro_Agent/output/
+Astro_Agent/data/
+Astro_Agent/.claude/
+Astro_Agent/vendor/
+Astro_Agent/astro_toolbox/data/
+Astro_Agent/**/*.sqlite
+Astro_Agent/**/*.fits
+
+# Nested repositories should stay independent
+**/.git/
