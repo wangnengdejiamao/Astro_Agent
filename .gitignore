@@ -66,3 +66,11 @@ Astro_Agent/**/*.fits
 
 # Nested repositories should stay independent
 **/.git/
+
+# Removed modules (not part of Astro_Agent core)
+prompt2graph_for_astronomy/
+rag_pipeline/
+literature/
+download_pdfs.py
+retry_failed.py
+verify_pdfs.py
