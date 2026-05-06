@@ -1,0 +1,48 @@
+# macOS / editors
+.DS_Store
+*.swp
+*.swo
+
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.ipynb_checkpoints/
+
+# Local/private configuration and credentials
+.env
+.env.*
+!.env.example
+.claude/
+*.pem
+*.key
+*.token
+secrets.*
+
+# Project caches, outputs, and downloaded science products
+output/
+astro_cache/
+astro_output/
+coadd_cache/
+koa_batch/
+batch_output/
+all_tools_*/
+new_source/
+*.fits
+*.fit
+*.fits.gz
+*.fit.gz
+*.h5
+*.hdf5
+
+# Generated reports/figures/logs
+*.log
+*.tmp
+*.png
+*.pdf
+*.csv
+*.ecsv
+*.parquet
