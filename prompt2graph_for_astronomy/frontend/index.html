@@ -50,6 +50,25 @@
       cursor: pointer;
     }
 
+    *::-webkit-scrollbar {
+      width: 9px;
+      height: 9px;
+    }
+
+    *::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    *::-webkit-scrollbar-thumb {
+      border: 2px solid #fff;
+      border-radius: 999px;
+      background: rgba(18, 204, 185, 0.42);
+    }
+
+    *::-webkit-scrollbar-thumb:hover {
+      background: rgba(7, 158, 145, 0.72);
+    }
+
     .app-shell {
       display: grid;
       grid-template-rows: auto 1fr;
@@ -178,9 +197,12 @@
     }
 
     .icon-btn {
-      width: 36px;
+      width: 42px;
+      height: 42px;
       padding: 0;
-      font-size: 17px;
+      font-size: 21px;
+      font-weight: 900;
+      line-height: 1;
     }
 
     .solid-btn {
@@ -408,7 +430,7 @@
 
     .graph-head h2 {
       margin: 0;
-      font-size: 17px;
+      font-size: 18px;
       line-height: 1.2;
     }
 
@@ -417,7 +439,7 @@
       align-items: center;
       gap: 8px;
       color: var(--muted);
-      font-size: 12px;
+      font-size: 13px;
       flex-wrap: wrap;
     }
 
@@ -433,10 +455,10 @@
       position: relative;
       min-height: 0;
       background:
-        linear-gradient(rgba(18, 204, 185, 0.06) 1px, transparent 1px),
-        linear-gradient(90deg, rgba(18, 204, 185, 0.06) 1px, transparent 1px),
+        linear-gradient(rgba(18, 204, 185, 0.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(18, 204, 185, 0.07) 1px, transparent 1px),
         #fff;
-      background-size: 38px 38px;
+      background-size: 44px 44px;
     }
 
     #kgCanvas {
@@ -457,6 +479,52 @@
       pointer-events: none;
     }
 
+    .graph-tooltip {
+      position: absolute;
+      z-index: 8;
+      display: none;
+      min-width: 180px;
+      max-width: 280px;
+      pointer-events: none;
+      padding: 10px 12px;
+      border: 1px solid rgba(18, 204, 185, 0.32);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 16px 32px rgba(23, 32, 51, 0.15);
+      backdrop-filter: blur(10px);
+      color: var(--ink);
+    }
+
+    .graph-tooltip h5 {
+      margin: 0 0 5px;
+      font-size: 14px;
+      line-height: 1.2;
+    }
+
+    .graph-tooltip .meta {
+      color: var(--muted);
+      font-size: 11.5px;
+      margin-bottom: 6px;
+    }
+
+    .graph-tooltip .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .graph-tooltip .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 20px;
+      padding: 2px 6px;
+      border-radius: 6px;
+      border: 1px solid rgba(18, 204, 185, 0.22);
+      background: rgba(18, 204, 185, 0.08);
+      color: #0b6f66;
+      font-size: 11px;
+    }
+
     .graph-footer {
       display: flex;
       justify-content: space-between;
@@ -473,32 +541,43 @@
       display: flex;
       flex-wrap: wrap;
       align-items: center;
-      gap: 12px;
+      gap: 9px;
     }
 
     .legend-item {
       display: inline-flex;
       align-items: center;
       gap: 6px;
+      min-height: 26px;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: #344054;
+      font-weight: 700;
       white-space: nowrap;
     }
 
     .legend-swatch {
-      width: 10px;
-      height: 10px;
+      width: 13px;
+      height: 13px;
       border-radius: 50%;
       display: inline-block;
+      box-shadow: 0 0 0 3px rgba(18, 204, 185, 0.08);
     }
 
     .right-panel .scroll-body {
       padding: 0;
+      display: grid;
+      grid-template-rows: minmax(220px, 34vh) 1fr;
+      overflow: hidden;
     }
 
     .source-list {
       border-bottom: 1px solid var(--line);
-      max-height: 32vh;
+      min-height: 0;
       overflow: auto;
-      padding: 10px;
+      padding: 11px;
       background: #fbfdfd;
     }
 
@@ -511,8 +590,8 @@
       border-radius: 8px;
       background: transparent;
       color: var(--ink);
-      padding: 9px;
-      margin-bottom: 4px;
+      padding: 11px;
+      margin-bottom: 6px;
       text-align: left;
     }
 
@@ -524,11 +603,13 @@
 
     .source-row.active {
       box-shadow: inset 3px 0 0 var(--mint);
+      background: #fff;
     }
 
     .source-name {
       min-width: 0;
       font-weight: 800;
+      font-size: 15px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
@@ -552,7 +633,7 @@
       border-radius: 6px;
       color: #096d65;
       background: rgba(18, 204, 185, 0.08);
-      font-size: 11px;
+      font-size: 11.5px;
       overflow-wrap: anywhere;
     }
 
@@ -563,9 +644,9 @@
     }
 
     .detail {
+      min-height: 0;
       padding: 16px;
       overflow: auto;
-      max-height: calc(100vh - 402px);
     }
 
     .detail h3 {
@@ -771,8 +852,9 @@
           <div class="field">
             <label for="limitSelect">图谱规模</label>
             <select id="limitSelect">
-              <option value="40">40 个源</option>
-              <option value="80" selected>80 个源</option>
+              <option value="40" selected>40 个源</option>
+              <option value="50">50 个源</option>
+              <option value="80">80 个源</option>
               <option value="120">120 个源</option>
               <option value="200">200 个源</option>
             </select>
@@ -816,10 +898,11 @@
             <button class="icon-btn" id="freezeGraph" type="button" title="暂停或恢复布局">Ⅱ</button>
           </div>
         </div>
-        <div class="canvas-wrap" id="canvasWrap">
-          <canvas id="kgCanvas"></canvas>
-          <div class="canvas-empty" id="canvasEmpty">当前筛选没有可展示的源画像</div>
-        </div>
+      <div class="canvas-wrap" id="canvasWrap">
+        <canvas id="kgCanvas"></canvas>
+        <div class="graph-tooltip" id="graphTooltip"></div>
+        <div class="canvas-empty" id="canvasEmpty">当前筛选没有可展示的源画像</div>
+      </div>
         <div class="graph-footer">
           <div class="legend">
             <span class="legend-item"><span class="legend-swatch" style="background:#213547"></span>天体源</span>
@@ -876,7 +959,7 @@
       selectedSource: "",
       feature: "",
       source: "",
-      limit: 80,
+      limit: 40,
       relation: {
         features: true,
         methods: true,
@@ -904,7 +987,8 @@
       canvasWrap: document.getElementById("canvasWrap"),
       canvas: document.getElementById("kgCanvas"),
       canvasEmpty: document.getElementById("canvasEmpty"),
-      reloadData: document.getElementById("reloadData")
+      reloadData: document.getElementById("reloadData"),
+      graphTooltip: document.getElementById("graphTooltip")
     };
 
     const fmt = new Intl.NumberFormat("zh-CN");
@@ -1188,10 +1272,10 @@
           });
         };
 
-        addRelations("features", "feature", state.feature ? 8 : 4);
-        addRelations("methods", "method", 3);
-        addRelations("parameters", "parameter", 3);
-        addRelations("instruments", "instrument", 2);
+        addRelations("features", "feature", state.feature ? 6 : 3);
+        addRelations("methods", "method", 2);
+        addRelations("parameters", "parameter", 2);
+        addRelations("instruments", "instrument", 1);
       });
 
       let nodeList = [...nodes.values()];
@@ -1212,10 +1296,18 @@
       const keepIds = new Set(nodeList.map((node) => node.id));
       const linkList = links.filter((link) => keepIds.has(link.source) && keepIds.has(link.target));
       const maxWeight = Math.max(1, ...nodeList.map((node) => node.weight));
+      const sizeByType = {
+        source: { base: 12, bonus: 20, max: 32 },
+        feature: { base: 15, bonus: 20, max: 35 },
+        method: { base: 13, bonus: 17, max: 29 },
+        parameter: { base: 13, bonus: 17, max: 29 },
+        instrument: { base: 12, bonus: 16, max: 27 }
+      };
       nodeList.forEach((node) => {
-        const base = node.type === "source" ? 7 : 9;
-        const bonus = Math.sqrt(node.weight / maxWeight) * (node.type === "source" ? 16 : 20);
-        node.radius = Math.min(node.type === "source" ? 23 : 28, base + bonus);
+        const profile = sizeByType[node.type] || sizeByType.source;
+        const bonus = Math.sqrt(node.weight / maxWeight) * profile.bonus;
+        node.radius = Math.min(profile.max, profile.base + bonus);
+        node.importance = node.weight / maxWeight;
       });
       return { nodes: nodeList, links: linkList };
     }
@@ -1275,18 +1367,18 @@
 
     function initLayout(data) {
       const anchors = {
-        source: [graph.width * 0.43, graph.height * 0.54],
-        feature: [graph.width * 0.40, graph.height * 0.22],
-        method: [graph.width * 0.76, graph.height * 0.42],
-        parameter: [graph.width * 0.68, graph.height * 0.75],
-        instrument: [graph.width * 0.22, graph.height * 0.73]
+        source: [graph.width * 0.46, graph.height * 0.52],
+        feature: [graph.width * 0.28, graph.height * 0.24],
+        method: [graph.width * 0.80, graph.height * 0.34],
+        parameter: [graph.width * 0.72, graph.height * 0.78],
+        instrument: [graph.width * 0.20, graph.height * 0.78]
       };
 
       data.nodes.forEach((node, index) => {
         const seed = hashText(node.id);
         const anchor = anchors[node.type] || [graph.width / 2, graph.height / 2];
         const angle = (seed % 628) / 100;
-        const spread = node.type === "source" ? 160 : 90;
+        const spread = node.type === "source" ? 230 : 145;
         node.x = anchor[0] + Math.cos(angle) * ((seed % spread) + index % 19);
         node.y = anchor[1] + Math.sin(angle) * ((seed % spread) + index % 17);
         node.vx = 0;
@@ -1325,8 +1417,8 @@
         const dx = target.x - source.x;
         const dy = target.y - source.y;
         const distance = Math.max(1, Math.sqrt(dx * dx + dy * dy));
-        const ideal = link.type === "feature" ? 92 : link.type === "method" ? 128 : 138;
-        const force = (distance - ideal) / distance * 0.018 * alpha;
+        const ideal = link.type === "feature" ? 148 : link.type === "method" ? 196 : link.type === "parameter" ? 206 : 180;
+        const force = (distance - ideal) / distance * 0.021 * alpha;
         const fx = dx * force;
         const fy = dy * force;
         if (!source.fixed) {
@@ -1351,10 +1443,10 @@
             dy = 0;
             dist2 = 1;
           }
-          const min = (a.radius + b.radius + 8);
-          if (dist2 < min * min * 10) {
+          const min = (a.radius + b.radius + 18);
+          if (dist2 < min * min * 14) {
             const distance = Math.sqrt(dist2);
-            const push = (min * min / Math.max(dist2, 20)) * 0.08 * alpha;
+            const push = (min * min / Math.max(dist2, 20)) * 0.14 * alpha;
             const fx = dx / distance * push;
             const fy = dy / distance * push;
             if (!a.fixed) {
@@ -1370,17 +1462,17 @@
       }
 
       const anchors = {
-        source: [graph.width * 0.43, graph.height * 0.54],
-        feature: [graph.width * 0.40, graph.height * 0.22],
-        method: [graph.width * 0.76, graph.height * 0.42],
-        parameter: [graph.width * 0.68, graph.height * 0.75],
-        instrument: [graph.width * 0.22, graph.height * 0.73]
+        source: [graph.width * 0.46, graph.height * 0.52],
+        feature: [graph.width * 0.28, graph.height * 0.24],
+        method: [graph.width * 0.80, graph.height * 0.34],
+        parameter: [graph.width * 0.72, graph.height * 0.78],
+        instrument: [graph.width * 0.20, graph.height * 0.78]
       };
 
       nodes.forEach((node) => {
         if (node.fixed) return;
         const anchor = anchors[node.type] || [graph.width / 2, graph.height / 2];
-        const anchorForce = node.type === "source" ? 0.003 : 0.006;
+        const anchorForce = node.type === "source" ? 0.0025 : 0.010;
         node.vx += (anchor[0] - node.x) * anchorForce * alpha;
         node.vy += (anchor[1] - node.y) * anchorForce * alpha;
         node.vx *= 0.82;
@@ -1395,8 +1487,115 @@
     function shouldLabel(node) {
       if (graph.hover?.id === node.id) return true;
       if (node.id === `source:${state.selectedSource}`) return true;
-      if (node.type !== "source") return true;
-      return node.weight > 160 || node.radius > 19;
+      if (node.type === "feature") return node.weight >= 300 || node.radius >= 38;
+      if (node.type === "source") return node.weight >= 650 || node.radius >= 36;
+      return node.weight >= 260 && node.radius >= 29;
+    }
+
+    function drawPolygon(ctx, x, y, radius, sides, rotation = 0) {
+      ctx.beginPath();
+      for (let i = 0; i < sides; i += 1) {
+        const angle = rotation + i * Math.PI * 2 / sides;
+        const px = x + Math.cos(angle) * radius;
+        const py = y + Math.sin(angle) * radius;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+    }
+
+    function drawNodeBody(ctx, node, selected) {
+      const r = node.radius;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r + (selected ? 7 : 4), 0, Math.PI * 2);
+      ctx.fillStyle = selected ? "rgba(18, 204, 185, 0.20)" : "rgba(255,255,255,0.88)";
+      ctx.fill();
+
+      ctx.shadowColor = selected ? "rgba(18, 204, 185, 0.38)" : "rgba(23, 32, 51, 0.16)";
+      ctx.shadowBlur = selected ? 18 : 8;
+      ctx.shadowOffsetY = selected ? 2 : 1;
+      ctx.fillStyle = relationColor(node.type);
+      ctx.strokeStyle = selected ? "#172033" : "rgba(23,32,51,0.18)";
+      ctx.lineWidth = selected ? 3 : 1.2;
+
+      if (node.type === "feature") {
+        drawPolygon(ctx, node.x, node.y, r, 6, Math.PI / 6);
+      } else if (node.type === "method") {
+        roundRect(ctx, node.x - r, node.y - r, r * 2, r * 2, 7);
+      } else if (node.type === "parameter") {
+        drawPolygon(ctx, node.x, node.y, r, 4, Math.PI / 4);
+      } else if (node.type === "instrument") {
+        drawPolygon(ctx, node.x, node.y + 1, r, 3, -Math.PI / 2);
+      } else {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+      }
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      drawNodeGlyph(ctx, node);
+    }
+
+    function drawNodeGlyph(ctx, node) {
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#fff";
+      if (node.type === "source") {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, Math.max(4, node.radius * 0.28), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, Math.max(7, node.radius * 0.52), 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,255,255,0.65)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      } else {
+        const glyph = {
+          feature: "★",
+          method: "∿",
+          parameter: "σ",
+          instrument: "◉"
+        }[node.type] || "•";
+        const fontSize = Math.max(12, Math.min(21, node.radius * 0.76));
+        ctx.font = `800 ${fontSize}px Microsoft YaHei, Segoe UI, sans-serif`;
+        ctx.fillText(glyph, node.x, node.y + 1);
+      }
+      ctx.restore();
+    }
+
+    function renderTooltip(node, x, y) {
+      if (!node) {
+        dom.graphTooltip.style.display = "none";
+        return;
+      }
+      const metaParts = [node.type];
+      if (node.weight) metaParts.push(`权重 ${fmt.format(node.weight)}`);
+      const tags = [];
+      if (node.profile?.features) {
+        entries(node.profile.features, 3).forEach(([name, count]) => {
+          tags.push(`<span class="tag">${escapeHtml(name)} · ${fmt.format(count)}</span>`);
+        });
+      }
+      if (node.profile?.methods && node.type === "source") {
+        entries(node.profile.methods, 2).forEach(([name, count]) => {
+          tags.push(`<span class="tag">${escapeHtml(name)} · ${fmt.format(count)}</span>`);
+        });
+      }
+      dom.graphTooltip.innerHTML = `
+        <h5>${escapeHtml(node.name)}</h5>
+        <div class="meta">${escapeHtml(metaParts.join(' · '))}</div>
+        <div class="tags">${tags.slice(0, 5).join("")}</div>
+      `;
+      dom.graphTooltip.style.display = "block";
+      const tipWidth = dom.graphTooltip.offsetWidth || 220;
+      const tipHeight = dom.graphTooltip.offsetHeight || 100;
+      const left = Math.min(graph.width - tipWidth - 16, Math.max(16, x + 18));
+      const top = Math.min(graph.height - tipHeight - 16, Math.max(16, y + 18));
+      dom.graphTooltip.style.left = `${left}px`;
+      dom.graphTooltip.style.top = `${top}px`;
     }
 
     function renderCanvas() {
@@ -1408,62 +1607,55 @@
       ctx.scale(graph.scale, graph.scale);
 
       const byId = new Map(graph.data.nodes.map((node) => [node.id, node]));
+      const selectedId = state.selectedSource ? `source:${state.selectedSource}` : "";
+      const focusId = graph.hover?.id || selectedId;
       graph.data.links.forEach((link) => {
         const source = byId.get(link.source);
         const target = byId.get(link.target);
         if (!source || !target) return;
+        const focused = focusId && (source.id === focusId || target.id === focusId);
         ctx.beginPath();
         ctx.moveTo(source.x, source.y);
         ctx.lineTo(target.x, target.y);
         ctx.strokeStyle = relationColor(link.type);
-        ctx.globalAlpha = graph.hover && graph.hover.id !== source.id && graph.hover.id !== target.id ? 0.08 : 0.22;
-        ctx.lineWidth = Math.max(1, Math.min(3.5, Math.sqrt(link.weight || 1) * 0.28));
+        ctx.globalAlpha = focusId ? (focused ? 0.54 : 0.055) : 0.16;
+        ctx.lineWidth = Math.max(focused ? 1.6 : 0.8, Math.min(focused ? 5 : 2.6, Math.sqrt(link.weight || 1) * (focused ? 0.42 : 0.22)));
         ctx.stroke();
       });
       ctx.globalAlpha = 1;
 
       graph.data.nodes.forEach((node) => {
         const selected = node.id === `source:${state.selectedSource}` || graph.hover?.id === node.id;
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, node.radius + (selected ? 4 : 0), 0, Math.PI * 2);
-        ctx.fillStyle = selected ? "rgba(18, 204, 185, 0.16)" : "rgba(255,255,255,0.82)";
-        ctx.fill();
-
-        ctx.beginPath();
-        ctx.arc(node.x, node.y, node.radius, 0, Math.PI * 2);
-        ctx.fillStyle = relationColor(node.type);
-        ctx.fill();
-        ctx.lineWidth = selected ? 2.5 : 1;
-        ctx.strokeStyle = selected ? "#172033" : "rgba(23,32,51,0.16)";
-        ctx.stroke();
-
-        if (node.type === "source") {
-          ctx.beginPath();
-          ctx.arc(node.x, node.y, Math.max(2.2, node.radius * 0.26), 0, Math.PI * 2);
-          ctx.fillStyle = "#fff";
-          ctx.fill();
-        }
+        drawNodeBody(ctx, node, selected);
       });
 
-      ctx.font = "12px Microsoft YaHei, Segoe UI, sans-serif";
       ctx.textAlign = "center";
       ctx.textBaseline = "top";
       graph.data.nodes.forEach((node) => {
         if (!shouldLabel(node)) return;
-        const text = truncate(node.name, node.type === "source" ? 22 : 18);
-        const y = node.y + node.radius + 5;
+        const text = truncate(node.name, node.type === "source" ? 24 : 19);
+        const y = node.y + node.radius + 8;
+        const fontSize = node.type === "source" ? 13.5 : 12.5;
+        ctx.font = `700 ${fontSize}px Microsoft YaHei, Segoe UI, sans-serif`;
         const metrics = ctx.measureText(text);
-        const width = Math.min(metrics.width + 10, 180);
-        ctx.fillStyle = "rgba(255,255,255,0.86)";
-        ctx.strokeStyle = "rgba(230,237,240,0.9)";
-        roundRect(ctx, node.x - width / 2, y - 2, width, 20, 6);
+        const width = Math.min(metrics.width + 15, 196);
+        const height = node.type === "source" ? 24 : 22;
+        ctx.fillStyle = "rgba(255,255,255,0.92)";
+        ctx.strokeStyle = node.type === "source" ? "rgba(18,204,185,0.42)" : "rgba(230,237,240,0.95)";
+        roundRect(ctx, node.x - width / 2, y - 2, width, height, 7);
         ctx.fill();
         ctx.stroke();
         ctx.fillStyle = node.type === "source" ? "#213547" : "#344054";
-        ctx.fillText(text, node.x, y + 2, width - 8);
+        ctx.fillText(text, node.x, y + 3, width - 10);
       });
 
       ctx.restore();
+
+      if (graph.hover) {
+        renderTooltip(graph.hover, graph.hover.x * graph.scale + graph.offsetX, graph.hover.y * graph.scale + graph.offsetY);
+      } else {
+        renderTooltip(null);
+      }
     }
 
     function roundRect(ctx, x, y, width, height, radius) {
@@ -1486,7 +1678,7 @@
         const node = graph.data.nodes[i];
         const dx = point.x - node.x;
         const dy = point.y - node.y;
-        if (dx * dx + dy * dy <= (node.radius + 7) * (node.radius + 7)) return node;
+        if (dx * dx + dy * dy <= (node.radius + 12) * (node.radius + 12)) return node;
       }
       return null;
     }
@@ -1520,9 +1712,9 @@
       document.getElementById("resetFilters").addEventListener("click", async () => {
         state.feature = "";
         state.source = "";
-        state.limit = 80;
+        state.limit = 40;
         dom.sourceSearch.value = "";
-        dom.limitSelect.value = "80";
+        dom.limitSelect.value = "40";
         renderFeatureFilters();
         await loadProfiles().catch((error) => showToast(error.message));
       });
@@ -1540,7 +1732,7 @@
       });
 
       dom.limitSelect.addEventListener("change", async (event) => {
-        state.limit = Number(event.target.value || 80);
+        state.limit = Number(event.target.value || 40);
         await loadProfiles().catch((error) => showToast(error.message));
       });
 
@@ -1590,6 +1782,7 @@
         if (node?.id !== graph.hover?.id) {
           graph.hover = node;
           dom.canvas.style.cursor = node ? "pointer" : "grab";
+          renderTooltip(node, event.offsetX, event.offsetY);
           renderCanvas();
         }
       });
@@ -1598,6 +1791,7 @@
         graph.hover = null;
         graph.dragNode = null;
         graph.pan = null;
+        renderTooltip(null);
         renderCanvas();
       });
 
