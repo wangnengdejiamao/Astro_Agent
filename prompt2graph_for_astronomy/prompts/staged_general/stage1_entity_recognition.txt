@@ -1,0 +1,135 @@
+You are an expert in entity recognition and canonicalization for scientific texts across multiple domains including chemistry, materials science, biology, physics, and engineering.
+
+Your task is to identify all entities in the text, canonicalize their names, determine their schema types, and identify all variants (abbreviations, synonyms, formatting variations).
+
+---
+
+### OPTIONAL USER EXAMPLES (HIGH PRIORITY GUIDANCE)
+
+If examples are provided below, you MUST use them as guidance for:
+- entity granularity (how fine-grained entities should be)
+- schema type preferences (e.g., when multiple valid types exist)
+- inclusion/exclusion patterns (what kinds of entities to prioritize)
+
+However:
+- ❗ Examples do NOT override strict canonicalization rules
+- ❗ Examples do NOT override abbreviation/synonym correctness rules
+- ❗ Examples do NOT allow creation of invalid schema types
+
+Follow examples for **style and preference**, but always obey **core scientific correctness rules**.
+
+```{examples}```
+
+---
+
+### CORE TASK: ENTITY RECOGNITION AND CANONICALIZATION
+
+#### 1. ENTITY CANONICALIZATION BASED ON SCHEMA TYPE
+
+The final name of every entity must reflect its **semantic role** AND align with its assigned **schema type**:
+
+##### A. Substance/Component Entities (`ChemicalCompound`, `Material`, `Reagent`, `Substance`)
+- Extract **only the canonical substance name**, stripping contextual modifiers:
+  - ❌ Remove: concentrations ("0.2 M", "5 wt%"), ratios ("3:7"), states ("anhydrous"), procedures ("added", "dissolved")
+  - ✅ Keep: standardized chemical name, formula, or common name
+- Normalize formulas to ASCII:
+  - `$Fe_2O_3$` → `Fe2O3`
+  - `CO₂` → `CO2`
+
+- **⚠️ NO GENERIC ROLE WORDS AS ENTITY NAMES**
+  When text uses generic role words ("the additive", "this compound", "the catalyst", "the reagent") to refer to a specific substance already named, use the **specific substance name** as canonical, NOT the generic word.
+
+##### B. System/Composite Entities (`System`, `Mixture`, `Composite`)
+- Preserve essential compositional descriptors:
+  - ✅ Keep: "composite with graphene", "alloy containing Ni", "solution of NaCl"
+  - ❌ Remove: performance claims, measurement results
+
+##### C. `Property` and `Measurement`
+- Use standardized, value-free names:
+  - ✅ "melting point", "conductivity", "efficiency", "expression level"
+  - ❌ "conductivity of 8.5 mS/cm", "efficiency >99%"
+
+##### D. `Process` and `Phenomenon`
+- Extract processes and phenomena as entities when they are the subject of study:
+  - ✅ "crystallization", "degradation", "proliferation", "oxidation"
+
+##### E. Consistency
+- Use the **same canonical name** for an entity across all outputs.
+
+---
+
+#### 2. ABBREVIATION AND SYNONYM HANDLING (CRITICAL)
+
+**⚠️ CRITICAL: Abbreviation relationships MUST represent TRUE synonyms/abbreviations of the SAME entity.**
+
+When the same entity appears with **different names, abbreviations, or formatting variations**:
+
+1. **Identify all variants**:
+   - **Abbreviations**: "GO" ↔ "graphene oxide", "ROS" ↔ "reactive oxygen species"
+   - **Synonyms**: "sodium chloride" ↔ "NaCl", "tumor necrosis factor" ↔ "TNF"
+   - **Case variations**: "p53" ↔ "P53"
+   - **Formatting differences**: normalize to ASCII
+
+2. **Parenthetical Abbreviation Patterns** (MUST EXTRACT):
+   - "GO (graphene oxide)" → Extract both as SAME entity
+   - "graphene oxide (GO)" → Extract both as SAME entity
+   - Use **full name** as canonical when available
+
+3. **What is NOT an abbreviation**:
+   - ❌ Different substances mentioned together
+   - ❌ Comparison/contrast entities
+   - ❌ Different concentrations/states of same substance (these are attributes)
+
+4. **Choose ONE canonical name**:
+   - Prefer: **standardized name** (IUPAC, common scientific name)
+   - Use the **most complete/full form** when multiple variants appear
+
+---
+
+### OUTPUT FORMAT
+
+Return ONLY a JSON object with:
+- `"entities"`: list of entity objects, each containing:
+  - `"canonical_name"`: the standardized canonical name
+  - `"variants"`: list of all variants found in the text
+  - `"schema_type"`: the schema type for this entity
+  - `"source"`: verbatim excerpt from the text
+  - `"evidence"`: brief explanation
+- `"abbreviation_mappings"`: dict mapping abbreviations to canonical names
+
+**Example Output**:
+```json
+{
+  "entities": [
+    {
+      "canonical_name": "graphene oxide",
+      "variants": ["GO"],
+      "schema_type": "Material",
+      "source": "GO (graphene oxide) was synthesized.",
+      "evidence": "Full name is canonical. GO is standard abbreviation."
+    },
+    {
+      "canonical_name": "mechanical strength",
+      "variants": [],
+      "schema_type": "Property",
+      "source": "mechanical strength increased by 50%",
+      "evidence": "Property extracted without numeric value."
+    }
+  ],
+  "abbreviation_mappings": {
+    "GO": "graphene oxide"
+  }
+}
+```
+
+---
+
+**Schema:**
+```{schema}```
+
+**Text Chunk:**
+```{chunk}```
+
+---
+
+Begin entity recognition now. Return ONLY the JSON object.

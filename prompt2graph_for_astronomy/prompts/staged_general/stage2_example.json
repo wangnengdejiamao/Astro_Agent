@@ -1,0 +1,89 @@
+{
+  "默认通用关系风格（标准三元组抽取，适用于大多数科学文本）": {
+    "input": "Graphene oxide enhances mechanical strength, and UV light activates photocatalysis.",
+    "output": {
+      "triples": [
+        {
+          "subject": "graphene oxide",
+          "relation": "enhances",
+          "object": "mechanical strength",
+          "source": "Graphene oxide enhances mechanical strength",
+          "evidence": "Active voice: GO (subject) enhances property (object)."
+        },
+        {
+          "subject": "UV light",
+          "relation": "activates",
+          "object": "photocatalysis",
+          "source": "UV light activates photocatalysis",
+          "evidence": "Active voice: condition activates process."
+        }
+      ]
+    }
+  },
+
+  "因果链风格（强调多步因果关系）": {
+    "input": "ROS generation causes DNA damage, which triggers apoptosis.",
+    "output": {
+      "triples": [
+        {
+          "subject": "ROS generation",
+          "relation": "causes",
+          "object": "DNA damage",
+          "source": "ROS generation causes DNA damage",
+          "evidence": "Direct causation: process causes phenomenon."
+        },
+        {
+          "subject": "DNA damage",
+          "relation": "triggers",
+          "object": "apoptosis",
+          "source": "DNA damage, which triggers apoptosis",
+          "evidence": "Relative clause indicates causation chain."
+        }
+      ]
+    }
+  },
+
+  "实验方法风格（强调测量和方法关系）": {
+    "input": "The expression level was measured by Western blot. Cell viability was assessed using MTT assay.",
+    "output": {
+      "triples": [
+        {
+          "subject": "expression level",
+          "relation": "is_measured_by",
+          "object": "Western blot",
+          "source": "expression level was measured by Western blot",
+          "evidence": "Passive voice: property is measured by method."
+        },
+        {
+          "subject": "cell viability",
+          "relation": "is_assessed_by",
+          "object": "MTT assay",
+          "source": "Cell viability was assessed using MTT assay",
+          "evidence": "Passive voice with 'using' indicating method."
+        }
+      ]
+    }
+  },
+
+  "调控关系风格（强调抑制和促进作用）": {
+    "input": "p53 inhibits tumor proliferation but promotes cell cycle arrest.",
+    "output": {
+      "triples": [
+        {
+          "subject": "p53",
+          "relation": "inhibits",
+          "object": "tumor proliferation",
+          "source": "p53 inhibits tumor proliferation",
+          "evidence": "Active voice: protein inhibits process."
+        },
+        {
+          "subject": "p53",
+          "relation": "promotes",
+          "object": "cell cycle arrest",
+          "source": "promotes cell cycle arrest",
+          "evidence": "Active voice: same subject promotes another process."
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,513 @@
+You are an expert materials scientist specializing in electromagnetic wave absorption materials and scientific knowledge graph extraction.
+
+Your task is to extract a structured scientific knowledge graph from the provided text chunk according to the given schema.
+
+PRIMARY GOAL:
+Build one unified multi-paper graph, but enforce a stable local backbone inside each paper:
+
+SourceDocument -> MaterialSystem -> ExperimentalSample -> (Characterization / Structure / EMProperty / Mechanism / Limitation)
+
+The final graph is global across many papers.
+However, each sample must first be anchored to:
+1. its source document
+2. its parent material system
+
+Then cross-paper connectivity should emerge through shared:
+- MaterialComponent
+- CarbonSupport
+- StructureConcept
+- EMProperty
+- LossMechanism
+
+This is a multi-document graph, not a set of isolated per-paper graphs.
+But document anchoring is mandatory.
+
+Return ONLY one raw JSON object with exactly these keys:
+- "attributes"
+- "triples"
+- "entity_types"
+
+Format:
+{
+  "attributes": {
+    "EntityName": ["key: value", "key: value"]
+  },
+  "triples": [
+    ["subject", "relation", "object"]
+  ],
+  "entity_types": {
+    "EntityName": "TypeName"
+  }
+}
+
+All entity names must be identical across attributes, triples, and entity_types.
+Do not output markdown, explanations, comments, or extra text.
+
+==================================================
+1. EXTRACTION ORDER (MANDATORY)
+==================================================
+
+Always follow this order:
+
+Step 1. Identify SourceDocument boundaries.
+Step 2. Identify one or more true MaterialSystem nodes for each SourceDocument.
+Step 3. Identify all ExperimentalSample mentions belonging to those MaterialSystem nodes.
+Step 4. Resolve sample aliases, shorthand names, descriptive mentions, and pronouns into canonical ExperimentalSample names.
+Step 5. Attach sample-specific scalar facts to the merged ExperimentalSample nodes.
+Step 6. Attach shared family-level non-scalar findings to the MaterialSystem.
+Step 7. Attach characterization / structure / property / mechanism / limitation nodes around the sample ring.
+Step 8. Add cross-paper concept reuse only through shared concept-level nodes, not by merging unrelated samples.
+
+Never skip identity resolution.
+Never output multiple nodes for the same sample if they are clearly coreferential.
+
+==================================================
+2. MULTI-DOCUMENT ANCHORING RULE
+==================================================
+
+This is a unified graph across many papers, not separate graphs.
+However, every ExperimentalSample must still be anchored to:
+- exactly one SourceDocument
+- exactly one primary MaterialSystem
+
+If the chunk contains multiple papers, titles, explicit labels such as “Paper 1”, “Paper 2”, or clearly distinct study systems:
+- create separate SourceDocument nodes
+- create MaterialSystem nodes under the correct SourceDocument
+- assign each sample to the correct SourceDocument and MaterialSystem
+- do NOT mix samples across documents
+
+Use SourceDocument as an anchor, not as a separator.
+The graph remains global because concept-level nodes are shared across documents.
+
+Preferred SourceDocument names:
+- Doc_1
+- Doc_2
+- Doc_3
+
+==================================================
+3. MATERIAL SYSTEM RULE
+==================================================
+
+A MaterialSystem is the central experimental platform or sample family within one SourceDocument.
+
+Use MaterialSystem for:
+- FeCu/GDY family
+- FeCoNiCuZn/GDY family
+- Fe3C microflake family
+- SA/graphene family
+- HCNF/HEA family
+
+A paper may contain more than one MaterialSystem if and only if the paper truly studies multiple distinct central systems.
+
+Do NOT create MaterialSystem nodes for:
+- background-only literature examples
+- generic review phrases
+- author names
+- vague words like “materials”, “composites”, “supports”
+
+Every ExperimentalSample must derive_from exactly one MaterialSystem.
+
+==================================================
+4. SAMPLE-RING RULE
+==================================================
+
+ExperimentalSample nodes must surround a MaterialSystem.
+
+Correct backbone:
+SourceDocument -> MaterialSystem -> ExperimentalSample
+
+Then:
+ExperimentalSample -> CharacterizationMethod / CharacterizationFinding / StructureConcept / EMProperty / LossMechanism / Limitation
+
+Do NOT create:
+- free-floating ExperimentalSample nodes
+- umbrella samples carrying an entire series
+- MaterialSystem nodes that absorb sample-level measured scalar values when explicit samples exist
+
+==================================================
+5. MANDATORY SAMPLE MERGING / COREFERENCE RULE
+==================================================
+
+This is the most important rule.
+
+If multiple mentions in the text refer to the same experimental sample, you MUST merge them into one canonical ExperimentalSample node.
+
+Merge all of the following when they refer to the same sample:
+- full name vs short name
+- code name vs descriptive phrase
+- “the sample”
+- “this sample”
+- “it”
+- “the 800°C sample”
+- “the 50 wt% loading sample”
+- “the optimal sample”
+- “the Cu-only/GDY sample”
+- “the counterpart”
+- repeated mentions across neighboring sentences
+- formatting/OCR variants
+- family label + unique condition label
+
+Examples:
+- “sample annealed at 800°C for 4 h”
+- “the 800°C sample”
+- “this sample”
+-> one canonical sample
+
+- “50 wt% loading sample”
+- “the optimal loading sample”
+-> one canonical sample, e.g. Sample_FeCu_GDY_L50
+
+- “Cu-only/GDY sample”
+- “the Cu counterpart”
+-> one canonical sample if context shows same object
+
+Use:
+- sample_name = one canonical name only
+- sample_aliases = all other textual variants
+- coreference_note = brief note when the merge depended on contextual reasoning
+
+Never create duplicate sample nodes that differ only by:
+- wording
+- formatting
+- abbreviation
+- pronoun reference
+- minor OCR variation
+- descriptive alias
+
+==================================================
+6. CANONICAL NAMING RULE
+==================================================
+
+Use canonical names reflecting system identity + defining condition.
+
+MaterialSystem naming:
+- System_FeCu_GDY
+- System_FeCoNiCuZn_GDY
+- System_Fe3C_microflakes
+- System_Co_SA_graphene_family
+- System_HCNF_HEA
+
+ExperimentalSample naming:
+- Sample_{system_core}_{condition}
+- Sample_{control_name}_{condition}
+
+Examples:
+- Sample_FeCoNiCuZn_GDY_T600_t2
+- Sample_FeCoNiCuZn_GDY_T600_t4
+- Sample_FeCoNiCuZn_GDY_T600_t6
+- Sample_FeCoNiCuZn_GDY_T800_t4
+- Sample_FeCu_GDY_L50
+- Sample_FeCu_GDY_R0.528_T600_t4
+- Sample_FeCu_GDY_T1000
+- Sample_Cu_GDY_T1000
+- Sample_Fe3C_550
+- Sample_Fe3C_700
+- Sample_Co_SA_graphene
+- Sample_Co_NP_graphene
+- Sample_pristine_graphene
+- Sample_HCNF_HEA_main
+- Sample_HCNF_FeCoNiCuMn
+
+Normalize vague textual mentions to canonical names when identity is clear.
+Do not keep generic names such as:
+- “50 wt% loading sample”
+- “FeCu/GDY composites”
+- “the sample”
+as final sample_name if a canonical name can be formed.
+
+==================================================
+7. FAMILY VS SAMPLE OWNERSHIP RULE
+==================================================
+
+MaterialSystem owns:
+- shared family-level non-scalar facts
+- shared morphology
+- shared structure
+- shared mechanism tendency
+- broad study objective
+- shared performance summary if not sample-specific
+
+ExperimentalSample owns:
+- all explicit measured scalar facts
+- all sample-specific comparison facts
+- all sample-specific characterization findings
+- all sample-specific performance and conditions
+
+MaterialSystem examples:
+- honeycomb-like porous structure
+- Fe-Cu dominant alloy family
+- SA-graphene family
+- shared mechanism tendency
+
+ExperimentalSample examples:
+- annealing_temperature
+- annealing_time
+- filler_loading
+- particle_size
+- RL_min_value
+- RL_min_frequency
+- EAB_value
+- EAB_frequency_range
+- matching_thickness
+- epsilon_real
+- epsilon_imag
+- mu_real
+- mu_imag
+- saturation_magnetization
+- coercivity
+- electrical_conductivity
+- specific_surface_area
+
+Never place sample-specific RL/EAB/thickness/particle size on MaterialSystem if explicit ExperimentalSample nodes exist.
+
+==================================================
+8. SERIES SPLITTING RULE
+==================================================
+
+When a paper compares a series, create one ExperimentalSample per explicit condition.
+
+Examples:
+- T600_t2
+- T600_t4
+- T600_t6
+- T800_t4
+- T1000
+- T1100
+- T1200
+- L50
+- R0.528
+- Co SA/graphene
+- Co NP/graphene
+- pristine graphene
+
+If multiple values align with multiple samples, assign them positionally.
+
+Forbidden:
+- one node with “particle_size: 70, 55, 82 nm”
+- one node with “RL_min_value: -15.4, -18.5, -46.9, -65.8 dB”
+- one family node carrying the whole series
+
+==================================================
+9. FIELD LEGALITY RULE
+==================================================
+
+Use scalar fields conservatively and legally.
+
+Allowed:
+- RL_min_value -> one numeric dB value only
+- RL_min_frequency -> one numeric GHz point only
+- EAB_value -> one numeric GHz width only
+- EAB_frequency_range -> one GHz interval only
+- matching_thickness -> one absorber thickness only
+- particle_size -> explicit size only
+- filler_loading -> wt% loading only
+- metal_molar_ratio -> true composition ratio only
+- precursor_loading_ratio -> true ratio only
+- precursor_amount_note -> raw amounts such as “1.5 mmol CuCl, 500 mg TEB”
+
+Forbidden:
+- descriptive phrases in numeric fields
+- “much narrower” in EAB_value
+- “significantly smaller” in particle_size
+- “specified” in filler_loading
+- “500 mg TEB” in filler_loading
+- “below 70%” in RL_min_value when it is actually absorption_rate
+- “peak at 11.6 GHz” in epsilon_imag if it is a peak position rather than a value
+- “outer diameter / inner diameter” in matching_thickness
+
+If a statement is descriptive rather than a legal scalar value, store it in:
+- performance_note
+- property_note
+- remarks
+
+==================================================
+10. TYPE DISCIPLINE RULE
+==================================================
+
+Do not confuse:
+- ExperimentalSample
+- MaterialSystem
+- MaterialComponent
+- CarbonSupport
+- DesignOutput
+
+Examples:
+- pristine graphene used as a tested comparator -> ExperimentalSample
+- graphene as substrate/support concept -> CarbonSupport or MaterialComponent depending context
+- Co SAs inside Co SA/graphene -> MaterialComponent or coordination feature, not a separate sample unless explicitly tested as a sample
+- predicted Model 1 / Model 2 absorbers -> DesignOutput unless explicitly synthesized and measured
+
+==================================================
+11. BACKGROUND EXCLUSION RULE
+==================================================
+
+Do NOT extract background-only literature examples, author names, prior-work systems, or generic review concepts unless they are:
+- explicit control samples in the current paper
+- directly used in structured comparison
+- central to the current paper’s experimental design
+
+Skip by default:
+- author names
+- unrelated literature materials
+- generic prior-work systems
+- generic “metal single atoms” statements
+- generic “high entropy materials” review statements
+
+Prioritize the current paper’s own:
+- MaterialSystem
+- ExperimentalSample
+- controls
+- comparisons
+- findings
+- mechanisms
+
+==================================================
+12. METHODS / SOFTWARE / INSTRUMENT DOWNWEIGHT RULE
+==================================================
+
+Do not let methods, software, calibration, or instrument names dominate the graph.
+
+Use methods mainly when they support sample-centered findings.
+
+Keep:
+- XRD
+- SEM
+- TEM
+- HR-TEM
+- SAED
+- EDS
+- XPS
+- Raman
+- BET
+- XAFS
+- XANES
+- EXAFS
+- VNA
+- VSM
+- L-TEM
+- Electron_Holography
+- Cole_Cole_Analysis
+- LLG_Fitting
+- Transmission_Line_Theory
+
+Downweight or omit unless scientifically central:
+- software names
+- instrument models
+- calibration details
+- ring dimensions
+- sample holder details
+- generic “EXAFS data” nodes
+- generic “DFT calculations” nodes
+- vague “samples” nodes
+
+==================================================
+13. CHARACTERIZATION CLOSURE RULE
+==================================================
+
+Characterization must close back to samples.
+
+Preferred pattern:
+- ExperimentalSample characterized_by CharacterizationMethod
+- CharacterizationMethod supports_finding CharacterizationFinding / StructureConcept / LossMechanism / Limitation
+- ExperimentalSample has_finding CharacterizationFinding
+- ExperimentalSample has_structure_concept StructureConcept
+- ExperimentalSample has_em_property EMProperty
+- ExperimentalSample associated_with_mechanism LossMechanism
+- ExperimentalSample limited_by Limitation
+
+Do not create free-floating characterization islands.
+
+Every CharacterizationMethod should be connected to:
+- at least one ExperimentalSample
+- and at least one finding or supported concept
+
+==================================================
+14. CONNECTIVITY ENFORCEMENT RULE
+==================================================
+
+The graph should maximize meaningful connectivity.
+
+Minimum backbone requirements:
+- Every ExperimentalSample must:
+  - reported_in one SourceDocument
+  - derived_from_system one MaterialSystem
+  - and connect to at least one of:
+    - CharacterizationMethod
+    - StructureConcept
+    - EMProperty
+    - LossMechanism
+    - Limitation
+
+- Every MaterialSystem must connect to:
+  - SourceDocument
+  - at least one ExperimentalSample
+  - and at least one of:
+    - MaterialComponent
+    - CarbonSupport
+    - StructureConcept
+    - LossMechanism
+
+- Every CharacterizationMethod must support at least one finding or concept.
+
+- Every LossMechanism should connect to at least one sample or system and one property/structure/finding when explicit.
+
+If a node would otherwise be isolated and no clear scientific linkage exists, omit it.
+
+You may use:
+- related_to
+only as a last-resort weak link when:
+- two entities clearly co-occur in the same system
+- a stronger explicit relation is unavailable
+- and the weak link improves legitimate connectivity
+
+Do not use related_to as the default relation.
+
+==================================================
+15. NO PLACEHOLDER RULE
+==================================================
+
+Never create entities named:
+- ExperimentalSample
+- MaterialSystem
+- MaterialComponent
+- CarbonSupport
+- SynthesisMethod
+- ProcessingCondition
+- CharacterizationMethod
+- CharacterizationFinding
+- StructureConcept
+- EMProperty
+- LossMechanism
+- Limitation
+- DesignOutput
+- sample
+- samples
+- material
+- materials
+- composite
+- composites
+- absorber
+- absorbers
+
+If no meaningful explicit name can be formed, omit the entity.
+
+==================================================
+16. FINAL PRIORITY ORDER
+==================================================
+
+When uncertain, prioritize:
+
+1. identify SourceDocument boundaries
+2. identify the correct MaterialSystem(s)
+3. merge all mentions of the same sample
+4. attach samples to systems
+5. place measured scalar values on samples
+6. place shared non-scalar facts on systems
+7. connect characterization / structure / mechanism around samples
+8. omit vague, background-only, or disconnected nodes
+
+Schema:
+```{schema}```
+
+Text Chunk:
+```{chunk}```

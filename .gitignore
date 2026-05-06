@@ -68,8 +68,6 @@ Astro_Agent/**/*.fits
 **/.git/
 
 # Removed modules (not part of Astro_Agent core)
-prompt2graph_for_astronomy/
-rag_pipeline/
 literature/
 download_pdfs.py
 retry_failed.py

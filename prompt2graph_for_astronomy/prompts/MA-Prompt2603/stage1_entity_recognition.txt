@@ -1,0 +1,853 @@
+You are an expert in entity recognition and canonicalization for scientific texts in chemistry, materials science, biology, and related domains.
+Your task is to identify all entities in the text, canonicalize their names, determine their schema types, and identify all variants (abbreviations, synonyms, formatting variations).
+
+ ---
+
+### OPTIONAL USER EXAMPLES (HIGH PRIORITY GUIDANCE)
+
+If examples are provided below, you MUST use them as guidance for:
+- entity granularity (how fine-grained entities should be)
+- schema type preferences (e.g., when multiple valid types exist)
+- inclusion/exclusion patterns (what kinds of entities to prioritize)
+
+However:
+- ❗ Examples do NOT override strict canonicalization rules
+- ❗ Examples do NOT override abbreviation/synonym correctness rules
+- ❗ Examples do NOT allow creation of invalid schema types
+
+Follow examples for **style and preference**, but always obey **core scientific correctness rules**.
+
+```{examples}```
+
+---
+
+CORE TASK: ENTITY RECOGNITION AND CANONICALIZATION
+ 
+
+This extraction is strictly sample-centered.
+
+The primary factual unit in experimental papers is the ExperimentalSample.
+
+This means:
+
+\- MaterialSystem = general material platform
+
+\- ExperimentalSample = specific sample under explicit experimental conditions
+
+\- Scalar values belong to ExperimentalSample attributes, not standalone entities
+
+ 
+
+Your goal in Stage 1 is to identify the entity nodes that should exist in the graph, assign each one a canonical name, determine its schema type, and record all valid variants and abbreviation mappings.
+
+ 
+
+Do NOT extract triples or attributes in this stage.
+
+ 
+
+ 
+
+\1. FOLLOW THE PROVIDED SCHEMA STRICTLY
+
+ 
+
+Only extract entities whose types are supported by the provided schema.
+
+ 
+
+Do NOT invent new schema types outside the provided schema.
+
+ 
+
+ 
+
+\2. SAMPLE-CENTERED ENTITY RECOGNITION PRINCIPLES
+
+ 
+
+ A. MaterialSystem
+
+Create a MaterialSystem entity when the text clearly describes a general material platform or overall material system.
+
+ 
+
+Use MaterialSystem for:
+
+\- the overall absorber platform
+
+\- the general composition-support system
+
+\- the umbrella material family from which specific tested samples are derived
+
+ 
+
+Examples:
+
+\- "FeCu/GDY absorber"
+
+\- "GDY-supported FeCu alloy"
+
+\- "FeCu alloy on graphdiyne"
+
+ 
+
+These should be normalized into one canonical MaterialSystem entity.
+
+ 
+
+ B. ExperimentalSample
+
+Create an ExperimentalSample entity when the text refers to a specific tested sample under explicit experimental conditions, especially when structure, EM properties, or EM performance are reported.
+
+ 
+
+Create separate ExperimentalSample entities when:
+
+\- explicitly compared processing conditions differ
+
+\- two variables are jointly varied and define distinct tested samples
+
+ 
+
+Do NOT merge distinct condition-specific samples into one entity.
+
+ 
+
+ C. MaterialComponent / CarbonSupport
+
+Use MaterialComponent for compositional entities such as metals, precursors, additives, or non-support components.
+
+ 
+
+Use CarbonSupport for carbon-based support frameworks when the text gives them a support role, such as:
+
+\- GDY
+
+\- graphene
+
+\- carbon nanotube
+
+ 
+
+If a carbon material is clearly functioning as the support scaffold, prefer CarbonSupport over MaterialComponent.
+
+ 
+
+ D. SynthesisMethod
+
+Use SynthesisMethod for named synthesis routes or clearly defined preparation methods.
+
+ 
+
+Examples:
+
+\- microwave-assisted synthesis
+
+\- solvothermal synthesis
+
+\- hydrothermal synthesis
+
+\- annealing-assisted synthesis
+
+ 
+
+ E. ProcessingCondition
+
+Use ProcessingCondition only for reusable condition concepts, not for every scalar value.
+
+ 
+
+Good examples:
+
+\- reductive annealing
+
+\- inert-atmosphere annealing
+
+\- high-temperature annealing
+
+ 
+
+Bad examples:
+
+\- 1000°C
+
+\- 4 h
+
+\- 50 wt%
+
+ 
+
+These scalar values should NOT become entities.
+
+ 
+
+ F. StructureConcept
+
+Use StructureConcept for reusable scientific concepts involving:
+
+\- phase conclusions
+
+\- alloying conclusions
+
+\- composition-analysis conclusions
+
+\- microstructure conclusions
+
+\- morphology conclusions
+
+ 
+
+Good examples:
+
+\- StructureConcept_Fe_Cu_Dominant_Phase
+
+\- StructureConcept_Cu_Peak_Weakening
+
+\- StructureConcept_Enhanced_Alloying
+
+\- StructureConcept_Non_Equiatomic_Composition
+
+\- StructureConcept_Particle_Aggregation
+
+\- StructureConcept_Sintering
+
+ 
+
+Bad examples:
+
+\- StructureConcept_395_nm
+
+\- StructureConcept_5.12_GHz
+
+\- StructureConcept_1000C
+
+ 
+
+Do NOT create StructureConcept nodes for raw scalar values.
+
+ 
+
+ G. CharacterizationMethod
+
+Use CharacterizationMethod for explicit characterization or measurement methods.
+
+ 
+
+Always use the short normalized method name as the canonical entity name when appropriate.
+
+ 
+
+Examples:
+
+\- XRD
+
+\- ICP
+
+\- Cole_Cole_Analysis
+
+\- Electron_Microscopy
+
+\- RL_Measurement
+
+ 
+
+Do NOT prepend "CharacterizationMethod_" to the name.
+
+ 
+
+ H. LossMechanism
+
+Use LossMechanism for explicit absorption or dissipation mechanisms.
+
+ 
+
+Examples:
+
+\- Dielectric_Loss
+
+\- Magnetic_Loss
+
+\- Interfacial_Polarization
+
+\- Dielectric_Relaxation
+
+ 
+
+ I. Limitation
+
+Use Limitation for explicit negative constraints, adverse factors, or performance-limiting concepts.
+
+ 
+
+Examples:
+
+\- Poor_Dispersion
+
+\- Impedance_Mismatch
+
+\- Particle_Aggregation
+
+\- Sintering
+
+ 
+
+ 
+
+ \3. DO NOT CREATE SCALAR-VALUE ENTITIES
+
+ 
+
+Do NOT create separate entities for scalar values or value-bearing pseudo-concepts.
+
+ 
+
+Never create entities such as:
+
+\- EAB_5.12GHz
+
+\- RL_minus48dB
+
+\- ParticleSize_395nm
+
+\- Temperature_1000C
+
+\- Frequency_13.2GHz
+
+ 
+
+Scalar values should be handled in Stage 3 as attributes of ExperimentalSample, not as Stage 1 entities.
+
+ 
+
+ 
+
+ \4. CHARACTERIZATION-AWARE ENTITY RECOGNITION
+
+ 
+
+For each characterization method, identify not only the method itself, but also the main explicitly supported finding WHEN that finding should exist as an entity node.
+
+ 
+
+This is especially important for:
+
+\- XRD
+
+\- ICP
+
+\- Cole-Cole analysis
+
+\- Electron microscopy
+
+ 
+
+ Specific guidance
+
+ 
+
+ XRD
+
+If the text explicitly states:
+
+\- phase dominance
+
+\- peak weakening or disappearance
+
+\- alloying
+
+\- interdiffusion
+
+\- phase evolution
+
+ 
+
+then recognize the relevant StructureConcept entity.
+
+ 
+
+ ICP or elemental analysis
+
+If the text explicitly states:
+
+\- composition deviation
+
+\- trace-element retention
+
+\- non-equiatomic composition
+
+ 
+
+then recognize the relevant StructureConcept entity.
+
+ 
+
+ Cole-Cole analysis
+
+If the text explicitly states:
+
+\- dielectric relaxation
+
+\- semicircle appearance with mechanistic meaning
+
+\- related dielectric-loss interpretation
+
+ 
+
+then recognize the relevant LossMechanism entity.
+
+ 
+
+ Electron microscopy
+
+If the text explicitly states:
+
+\- aggregation
+
+\- dense morphology
+
+\- poor dispersion
+
+\- sintering
+
+\- morphology-based limitations
+
+ 
+
+then recognize the relevant StructureConcept or Limitation entity.
+
+ 
+
+If the text only gives particle size as a number, do NOT create a particle-size entity.
+
+ 
+
+ \5. ANALYSIS PRESERVATION RULE
+
+ 
+
+Do not over-compress analytical findings into generic remarks.
+
+ 
+
+If the text explicitly presents a reusable scientific interpretation or conclusion, preserve it as:
+
+\- StructureConcept
+
+\- LossMechanism
+
+\- Limitation
+
+ 
+
+Only elevate reusable analytical concepts into nodes.
+
+ 
+
+Do NOT elevate raw numbers into nodes.
+
+ 
+
+ 
+
+ \6. CANONICAL NAMING RULES
+
+ 
+
+ A. Unified prefixes
+
+Use fully unified prefixes. Do not mix alternative prefixes.
+
+ 
+
+ B. MaterialSystem naming
+
+MaterialSystem entities must always use:
+
+\- "System_{composition}_{support}"
+
+ 
+
+Example:
+
+\- System_FeCu_GDY
+
+ 
+
+Do NOT use:
+
+\- MaterialSystem_{...}
+
+ 
+
+ C. ExperimentalSample naming
+
+ExperimentalSample entities must always use:
+
+\- "Sample_{composition}_{support}_{main_variable}"
+
+ 
+
+Examples:
+
+\- Sample_FeCu_GDY_T600
+
+\- Sample_FeCu_GDY_t4h
+
+\- Sample_FeCu_GDY_L50wt
+
+\- Sample_FeCu_GDY_T800_t4h
+
+ 
+
+Do NOT use:
+
+\- ExperimentalSample_{...}
+
+\- ExperimentalSample_Sample_{...}
+
+ 
+
+ D. StructureConcept naming
+
+StructureConcept entities must always use:
+
+\- "StructureConcept_{normalized_finding}"
+
+ 
+
+Examples:
+
+\- StructureConcept_Fe_Cu_Dominant_Phase
+
+\- StructureConcept_Cu_Peak_Weakening
+
+\- StructureConcept_Enhanced_Alloying
+
+\- StructureConcept_Non_Equiatomic_Composition
+
+ 
+
+Do NOT use bare variants such as:
+
+\- Fe_Cu_Dominant_Phase
+
+\- Cu_Peak_Weakening
+
+\- Non_Equiatomic_Composition
+
+ 
+
+ E. CharacterizationMethod / LossMechanism / Limitation naming
+
+Use short normalized names.
+
+ 
+
+Examples:
+
+\- XRD
+
+\- ICP
+
+\- Cole_Cole_Analysis
+
+\- Electron_Microscopy
+
+\- Dielectric_Relaxation
+
+\- Impedance_Mismatch
+
+ 
+
+ F. Compressed ExperimentalSample naming logic
+
+Do NOT include all conditions in the sample name by default.
+
+ 
+
+Identify the main comparison variable of the experimental series:
+
+\- If the section mainly compares annealing temperature, use temperature in the sample name.
+
+\- If the section mainly compares annealing time, use time in the sample name.
+
+\- If the section mainly compares filler loading, use loading in the sample name.
+
+\- If two variables are explicitly varied together and jointly define the comparison, include both.
+
+\- Keep other fixed background conditions out of the sample name.
+
+ 
+
+If a condition is constant across the compared series, do NOT encode it into the sample name.
+
+ 
+
+ G. Original composition order
+
+Use the original composition order as stated in the text.
+
+Do NOT permute element order.
+
+ 
+
+ 
+
+ \7. ABBREVIATION AND VARIANT HANDLING
+
+ 
+
+When the same entity appears with different names, abbreviations, or formatting variations, you MUST:
+
+\- identify them as the same entity
+
+\- choose ONE canonical name
+
+\- record the other forms in `variants`
+
+\- add valid abbreviation mappings when appropriate
+
+ 
+
+ Parenthetical patterns
+
+Always recognize parenthetical patterns as explicit abbreviation definitions.
+
+ 
+
+Examples:
+
+\- "X-ray diffraction (XRD)" or "XRD (X-ray diffraction)"
+
+\- "graphdiyne (GDY)" or "GDY (graphdiyne)"
+
+ 
+
+Rules:
+
+\- extract both the full form and abbreviation
+
+\- use the canonical name according to the naming policy for that schema type
+
+\- do NOT create separate entities for abbreviation and full form if they are the same entity
+
+ 
+
+ Validation rules
+
+Create an abbreviation/variant mapping only if the two forms refer to the SAME entity.
+
+ 
+
+These are NOT abbreviation relationships:
+
+\- different chemical substances
+
+\- different compositions
+
+\- different hydration states
+
+\- different concentrations
+
+\- entities mentioned together for comparison
+
+\- different condition-specific samples
+
+ 
+
+ Generic referents
+
+If the text uses generic role words such as:
+
+\- the sample
+
+\- this material
+
+\- the absorber
+
+\- the product
+
+\- the alloy
+
+\- the support
+
+ 
+
+and they clearly refer to a specific previously named entity in the same chunk, use the specific entity as canonical_name.
+
+ 
+
+Do NOT create a separate entity whose canonical_name is only a generic referent if the specific referent is already identifiable.
+
+ 
+
+ 
+
+ \8. CONSISTENCY RULES
+
+ 
+
+\- Use the same canonical name for the same entity throughout the output.
+
+\- Do not create duplicate entities for the same underlying entity.
+
+\- Do not merge different condition-specific samples into one entity.
+
+\- Do not confuse MaterialSystem with ExperimentalSample.
+
+\- Do not use placeholder or vague forms as canonical names if a more specific valid name is available.
+
+ 
+
+ 
+
+ \9. SOURCE AND EVIDENCE REQUIREMENTS
+
+ 
+
+For each entity:
+
+ 
+
+\- `source` must be a contiguous, verbatim excerpt from the input text that clearly contains the entity mention.
+
+\- Prefer a full sentence or a clearly interpretable local phrase.
+
+\- Do NOT paraphrase.
+
+ 
+
+For `evidence`:
+
+\- explain why this entity should be recognized
+
+\- explain why the chosen canonical name is appropriate
+
+\- explain why the assigned schema type is correct
+
+\- if relevant, explain why a variant/abbreviation/generic referent is mapped to the same entity
+
+\- if relevant, explain why this is a reusable concept node rather than a scalar attribute
+
+ 
+
+ 
+
+ OUTPUT FORMAT
+
+ 
+
+Return ONLY a JSON object with:
+
+ 
+
+\- `"entities"`: list of entity objects, each containing:
+
+  \- `"canonical_name"`: standardized canonical entity name
+
+  \- `"variants"`: list of all valid variants found in the text
+
+  \- `"schema_type"`: schema type for this entity
+
+  \- `"source"`: verbatim excerpt from the text
+
+  \- `"evidence"`: brief explanation of entity recognition and canonicalization
+
+ 
+
+\- `"abbreviation_mappings"`: dict mapping abbreviations or short forms to their canonical names
+
+  \- Format: `{"abbrev": "canonical_name"}`
+
+ 
+
+Example:
+
+{
+
+  "entities": [
+
+​    {
+
+​      "canonical_name": "System_FeCu_GDY",
+
+​      "variants": ["FeCu/GDY absorber", "GDY-supported FeCu alloy"],
+
+​      "schema_type": "MaterialSystem",
+
+​      "source": "The FeCu/GDY absorber was synthesized for electromagnetic wave absorption.",
+
+​      "evidence": "General material platform entity. Sample-centered schema requires a MaterialSystem node for the overall FeCu-GDY platform."
+
+​    },
+
+​    {
+
+​      "canonical_name": "Sample_FeCu_GDY_T600",
+
+​      "variants": ["the 600°C sample", "FeCu/GDY annealed at 600°C"],
+
+​      "schema_type": "ExperimentalSample",
+
+​      "source": "The FeCu/GDY sample annealed at 600°C exhibited a particle size of about 155 nm.",
+
+​      "evidence": "Condition-specific tested sample under explicit annealing temperature. ExperimentalSample is the primary factual unit."
+
+​    },
+
+​    {
+
+​      "canonical_name": "XRD",
+
+​      "variants": ["X-ray diffraction"],
+
+​      "schema_type": "CharacterizationMethod",
+
+​      "source": "XRD (X-ray diffraction) analysis revealed gradual weakening of Cu peaks.",
+
+​      "evidence": "Explicit characterization method. Short normalized method name is used as canonical name for CharacterizationMethod."
+
+​    },
+
+​    {
+
+​      "canonical_name": "StructureConcept_Cu_Peak_Weakening",
+
+​      "variants": ["gradual weakening of Cu peaks", "Cu peak weakening"],
+
+​      "schema_type": "StructureConcept",
+
+​      "source": "XRD analysis revealed gradual weakening of Cu peaks with increasing annealing temperature.",
+
+​      "evidence": "Reusable analytical conclusion from XRD. This is a structure-related concept node, not a scalar attribute."
+
+​    }
+
+  ],
+
+  "abbreviation_mappings": {
+
+​    "GDY": "System_FeCu_GDY",
+
+​    "XRD": "XRD"
+
+  }
+
+}
+
+
+
+Schema:
+
+\```{schema}```
+
+ 
+
+Text Chunk:
+
+\```{chunk}```
+
+ 
+
+Begin entity recognition now. Return ONLY the JSON object.

@@ -1,0 +1,516 @@
+You are an expert materials scientist specializing in electromagnetic wave absorption materials and scientific knowledge graph extraction.
+
+Your task is to extract a structured scientific knowledge graph from the provided text chunk according to the given schema.
+
+Goal:
+Build a strictly sample-centered graph for EMW absorber papers while preserving:
+- explicit sample-level conditions and measured performance,
+- reusable structural and mechanistic findings,
+- characterization-supported conclusions,
+- clean document boundaries,
+- and high naming consistency.
+
+Output format:
+Return ONLY one raw JSON object with exactly these keys:
+- "attributes"
+- "triples"
+- "entity_types"
+
+The output format must be:
+{
+  "attributes": {
+    "EntityName": ["key: value", "key: value"]
+  },
+  "triples": [
+    ["subject", "relation", "object"]
+  ],
+  "entity_types": {
+    "EntityName": "TypeName"
+  }
+}
+
+All subjects, relations, objects, and entity names must be strings.
+Do not output markdown, explanations, comments, or extra text.
+
+--------------------------------
+CORE PRINCIPLES
+--------------------------------
+
+1. ExperimentalSample is the primary factual unit.
+   - Use ExperimentalSample only for a specific tested sample, control sample, or clearly condition-specific sample.
+   - Store explicit scalar values on ExperimentalSample attributes whenever possible.
+
+2. MaterialSystem is not ExperimentalSample.
+   - MaterialSystem is the general material platform or study-level system.
+   - Do not put sample-specific measured values on MaterialSystem.
+
+3. DesignOutput is not ExperimentalSample.
+   - If the text describes model recommendations, inverse-design outputs, target recipes, or suggested compositions not yet measured as actual samples, create DesignOutput instead of ExperimentalSample.
+
+4. If a fact is not explicit, do not infer it.
+   - Never interpolate, estimate, average, or infer missing numeric values.
+   - Never invent sample names, ratios, frequencies, or thicknesses.
+
+5. If an entity cannot be named confidently, omit it.
+   - Do NOT create placeholder entities.
+
+--------------------------------
+STRICT ANTI-PLACEHOLDER RULE
+--------------------------------
+
+Never create entities whose names are generic placeholders or schema class names.
+
+Forbidden entity names include:
+- ExperimentalSample
+- MaterialSystem
+- MaterialComponent
+- CarbonSupport
+- CharacterizationMethod
+- StructureConcept
+- LossMechanism
+- Limitation
+- SynthesisMethod
+- ProcessingCondition
+- DesignOutput
+- Sample
+- System
+- samples
+- sample
+- material
+- materials
+- composite
+- composites
+- absorber
+- absorbers
+
+If the only available name is generic or ambiguous, skip that entity.
+
+--------------------------------
+DOCUMENT BOUNDARY RULE
+--------------------------------
+
+If the chunk contains multiple papers, multiple abstracts, or clearly separated studies:
+- create separate SourceDocument entities,
+- keep MaterialSystem and ExperimentalSample families separated by document,
+- do not merge samples or systems across document boundaries unless identity is explicitly stated.
+
+Use one SourceDocument per paper/study whenever the text clearly contains separate paper titles or separate study sections.
+
+Preferred SourceDocument naming:
+- Doc_1
+- Doc_2
+- Doc_3
+or
+- Doc_{short_title}
+
+Recommended minimal relations:
+- ExperimentalSample reported_in SourceDocument
+- MaterialSystem reported_in SourceDocument
+- DesignOutput reported_in SourceDocument
+
+--------------------------------
+ABSTRACT MODE RULE
+--------------------------------
+
+If the input is only an abstract or title/abstract fragment:
+- extract only explicit headline facts,
+- do not create multiple condition-series samples unless they are explicitly named,
+- do not invent detailed sample families from trends,
+- do not force characterization chains unless explicit.
+
+Abstract-only extraction should remain shallow and conservative.
+
+--------------------------------
+ENTITY CREATION RULES
+--------------------------------
+
+Create entities only when they are explicit and useful.
+
+1. SourceDocument
+Use when a paper/study boundary is visible.
+
+2. MaterialSystem
+Use for the general material platform.
+Examples:
+- FeCu/GDY system
+- Co SA/graphene system
+- HCNF/FeCoNiCuMn system
+
+3. ExperimentalSample
+Use for:
+- explicit sample codes,
+- clearly named tested samples,
+- control samples,
+- series members under different temperature/time/loading/ratio conditions,
+- representative comparison samples.
+
+4. MaterialComponent / CarbonSupport
+Use for explicit composition/support entities.
+Do not create synonym lists as one entity.
+Use one normalized entity per component/support.
+
+5. SynthesisMethod
+Use only named synthesis routes or clear preparation methods.
+
+6. ProcessingCondition
+Use reusable process concepts, not every scalar number.
+Examples:
+- Ar atmosphere
+- H2/Ar atmosphere
+- isothermal quenching
+- annealing under Ar
+
+7. StructureConcept
+Use only reusable scientific findings.
+Good examples:
+- honeycomb_like_porous_structure
+- Fe_Cu_dominant_phase
+- lattice_distortion
+- Co_N_coordination
+- strip_domain_structures
+- graphitic_carbon
+- particle_aggregation
+
+Do NOT create StructureConcept for raw scalar values.
+
+8. CharacterizationMethod
+Use normalized short method names.
+Examples:
+- XRD
+- SEM
+- TEM
+- HR-TEM
+- HAADF-STEM
+- EDS
+- ICP
+- ICP-AES
+- XPS
+- Raman
+- XAFS
+- XANES
+- EXAFS
+- Cole_Cole_Analysis
+- Electron_Holography
+- L-TEM
+- VNA
+- VSM
+
+Do not use instrument model names as entity names.
+
+9. LossMechanism
+Use explicit mechanisms only.
+Examples:
+- dielectric_loss
+- magnetic_loss
+- interfacial_polarization
+- dipole_polarization
+- dielectric_relaxation
+- conductive_loss
+- eddy_current_loss
+- natural_resonance
+
+10. Limitation
+Use explicit constraints or failure causes.
+Examples:
+- poor_dispersion
+- impedance_mismatch
+- particle_aggregation
+- sintering
+- low_graphitization
+- phase_separation
+
+11. DesignOutput
+Use for:
+- model-recommended recipes,
+- inverse-design recommendations,
+- target compositions,
+- predicted operating bands,
+- suggested loading amounts
+when they are not yet actual measured experimental samples.
+
+--------------------------------
+NAMING RULES
+--------------------------------
+
+Use one consistent naming logic.
+
+1. Prefer normalized explicit sample names if the paper gives stable sample codes or sample names.
+Examples:
+- Sample_HCNF_FeCoNiCuMn
+- Sample_Co_SA_graphene
+- Sample_Co_NP_graphene
+- Sample_pristine_graphene
+- Sample_Fe3C_700
+
+2. If no stable sample code exists, use canonical naming:
+- Sample_{composition}_{support}_{main_variable}
+Examples:
+- Sample_FeCu_GDY_T600
+- Sample_FeCu_GDY_t4h
+- Sample_FeCu_GDY_L50wt
+- Sample_FeCu_GDY_R0.528
+
+3. For series naming:
+- temperature series: T{temperature}
+- time series: t{time}
+- loading series: L{loading}
+- ratio series: R{ratio}
+
+4. Store constant background conditions as attributes, not in the sample name.
+
+5. For MaterialSystem, prefer:
+- System_{composition}_{support}
+Examples:
+- System_FeCu_GDY
+- System_Co_SA_graphene
+- System_FeCoNiCuMn_HCNF
+
+6. Use normalized underscores.
+Avoid bare natural-language names when a stable normalized form can be used.
+
+--------------------------------
+RELATION DIRECTION RULES
+--------------------------------
+
+Use relation directions strictly as follows:
+
+- ExperimentalSample reported_in SourceDocument
+- MaterialSystem reported_in SourceDocument
+- DesignOutput reported_in SourceDocument
+- ExperimentalSample derived_from_system MaterialSystem
+- ExperimentalSample has_component MaterialComponent
+- ExperimentalSample supported_on CarbonSupport
+- ExperimentalSample prepared_by SynthesisMethod
+- ExperimentalSample processed_under ProcessingCondition
+- ExperimentalSample has_structure_concept StructureConcept
+- ExperimentalSample characterized_by CharacterizationMethod
+- CharacterizationMethod supports_finding StructureConcept / LossMechanism / Limitation
+- ExperimentalSample associated_with_mechanism LossMechanism
+- ExperimentalSample limited_by Limitation
+- ExperimentalSample compared_with ExperimentalSample
+- SourceDocument proposes_design DesignOutput
+- DesignOutput targets_system MaterialSystem
+
+Only CharacterizationMethod can be the subject of supports_finding.
+
+--------------------------------
+ATTRIBUTE-FIRST RULE
+--------------------------------
+
+Whenever explicit and sample-specific, store the following on ExperimentalSample as attributes instead of separate nodes:
+
+- annealing_temperature
+- annealing_time
+- filler_loading
+- metal_molar_ratio
+- precursor_loading_ratio
+- atmosphere
+- particle_size
+- phase_description
+- composition_note
+- specific_surface_area
+- pore_volume
+- pore_size_distribution
+- electrical_conductivity
+- thermal_conductivity
+- saturation_magnetization
+- coercivity
+- RL_min_value
+- RL_min_frequency
+- EAB_value
+- EAB_frequency_range
+- matching_thickness
+- absorption_rate
+- working_frequency_point
+- working_frequency_band
+- temperature_stability_range
+- epsilon_real
+- epsilon_imag
+- mu_real
+- mu_imag
+- charge_density
+- charge_density_ratio
+- coordination_environment
+- sample_role
+- property_note
+- performance_note
+- remarks
+
+Do not create scalar-value nodes.
+
+--------------------------------
+NUMERIC EXTRACTION RULES
+--------------------------------
+
+1. Extract only explicit numeric values.
+2. Never interpolate missing values across a series.
+3. If only part of a series is numeric, assign only those explicit values to the matching samples.
+4. Missing numeric fields are allowed when the text does not explicitly provide them.
+5. Do not treat descriptive phrases as numeric values.
+
+Examples of illegal values that must be omitted from numeric fields:
+- enhanced maximum absorption rate
+- reaches
+- only dB
+- below
+- ultrawide
+- low
+- higher than others
+
+--------------------------------
+FIELD LEGALITY RULES
+--------------------------------
+
+1. RL_min_value
+   - reflection loss only
+   - numeric value in dB
+   - examples: -65.8 dB, -52.09 dB
+
+2. RL_min_frequency
+   - single frequency corresponding to RL_min
+   - numeric value in GHz
+   - not a test range
+
+3. EAB_value
+   - bandwidth width only
+   - numeric value in GHz
+   - not “entire Ku-band” or “ultrawide”
+
+4. EAB_frequency_range
+   - interval only
+   - examples: 9.7-12.1 GHz, 10.2-13.6 GHz
+
+5. matching_thickness
+   - absorber thickness only
+   - not toroid inner/outer diameter
+
+6. absorption_rate
+   - percentage or fraction only
+   - do not store it in RL_min_value
+
+7. working_frequency_point
+   - single operating frequency point
+   - use when the paper emphasizes absorption-rate or designed operating point instead of RL_min
+
+8. working_frequency_band
+   - operating band for non-RL style papers
+
+9. epsilon_real / epsilon_imag / mu_real / mu_imag
+   - only store when the quantity is explicitly named
+   - if frequency-specific, format as:
+     value @ frequency
+   - example:
+     mu_imag: 0.29 @ 2.0 GHz
+
+10. charge_density / charge_density_ratio
+    - use only for explicit charge-density style papers
+    - do not convert them into dielectric parameters
+
+11. coordination_environment
+    - use for explicit local coordination such as Co-N4
+
+If a candidate value does not match the field semantics, omit it.
+
+--------------------------------
+CHARACTERIZATION RULES
+--------------------------------
+
+For each explicit characterization result:
+
+1. connect the sample to the method:
+   - ExperimentalSample characterized_by CharacterizationMethod
+
+2. preserve the supported conclusion:
+   - CharacterizationMethod supports_finding StructureConcept / LossMechanism / Limitation
+
+3. when appropriate, also connect the sample to that finding:
+   - ExperimentalSample has_structure_concept StructureConcept
+   - ExperimentalSample associated_with_mechanism LossMechanism
+   - ExperimentalSample limited_by Limitation
+
+Do not stop at extracting the method name alone if the text explicitly gives the conclusion.
+
+Examples:
+- XRD -> fcc phase, graphitic carbon, peak weakening, alloying
+- ICP / ICP-AES -> actual composition, loading amount
+- XPS / XAFS / EXAFS -> valence state, coordination, lattice distortion, intermetallic bonding
+- Cole_Cole_Analysis -> dielectric relaxation
+- Electron_Holography -> charge redistribution, high-charge-density nanoscale regions
+- Electron microscopy -> particle size, aggregation, dense particles, dispersion state
+
+Use normalized method names only.
+Do not use instrument models or software names as the main method entity.
+
+--------------------------------
+DESIGN OUTPUT RULES
+--------------------------------
+
+If the text gives model recommendations, target recipes, or inverse-design outputs that are not experimentally measured samples:
+- create DesignOutput
+- do not treat them as ExperimentalSample
+
+Examples of DesignOutput content:
+- recommended loading
+- target operating frequency
+- recommended composition
+- model-predicted band
+
+--------------------------------
+ANTI-DUPLICATION RULES
+--------------------------------
+
+1. Do not duplicate the same fact as both node and attribute.
+2. Do not create scalar nodes such as:
+   - RL_-65.8dB
+   - EAB_7.68GHz
+   - Size_45nm
+   - Temp_800C
+3. Use one normalized entity name across attributes, triples, and entity_types.
+4. Do not output synonym arrays as entity names.
+5. Prefer one canonical component/support entity.
+6. Keep the most specific explicit value if duplicates exist.
+
+--------------------------------
+UNIT NORMALIZATION RULES
+--------------------------------
+
+Normalize units to:
+- temperature: °C
+- time: h, min, s
+- particle size / length / thickness: nm, μm, mm
+- frequency: GHz
+- reflection loss: dB
+- bandwidth: GHz
+- loading: wt%
+- specific surface area: m²/g
+- pore volume: cm³/g
+- electrical conductivity: S/cm
+- thermal conductivity: W m⁻¹ K⁻¹
+- magnetization: emu/g
+- coercivity: Oe
+- ratios: colon format or explicit ratio format
+
+Examples:
+- 600℃ -> 600°C
+- 2 hours -> 2 h
+- 10 s -> 10 s
+- 2 wt % -> 2 wt%
+- 450 m2 g−1 -> 450 m²/g
+
+--------------------------------
+FINAL CHECK BEFORE OUTPUT
+--------------------------------
+
+Before outputting, ensure:
+- no placeholder entity names exist,
+- no generic schema names are used as entities,
+- no illegal descriptive phrases are stored in numeric fields,
+- samples from different papers are not merged,
+- DesignOutput is not confused with ExperimentalSample,
+- attributes, triples, and entity_types use exactly the same entity names.
+
+Schema:
+```{schema}```
+
+Text Chunk:
+```{chunk}```

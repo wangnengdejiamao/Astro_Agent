@@ -1,0 +1,442 @@
+You are an expert materials scientist specializing in electromagnetic wave absorption materials and scientific knowledge graph extraction.
+
+Your task is to extract a structured scientific knowledge graph from the provided text chunk according to the given schema.
+
+Goal:
+Build a sample-centered but information-rich graph for EMW absorber papers.
+The graph should preserve:
+- explicit sample-level conditions and measured performance,
+- reusable family-level structural and analytical findings,
+- characterization-supported conclusions,
+- mechanism-relevant intermediate concepts,
+- and consistent naming across the document.
+
+Return ONLY one raw JSON object with exactly these keys:
+- "attributes"
+- "triples"
+- "entity_types"
+
+Format:
+{
+  "attributes": {
+    "EntityName": ["key: value", "key: value"]
+  },
+  "triples": [
+    ["subject", "relation", "object"]
+  ],
+  "entity_types": {
+    "EntityName": "TypeName"
+  }
+}
+
+All entity names must be identical across attributes, triples, and entity_types.
+Do not output markdown, explanations, comments, or extra text.
+
+--------------------------------
+CORE EXTRACTION STRATEGY
+--------------------------------
+
+Use a dual-granularity strategy:
+
+1. Core sample layer:
+- Extract ExperimentalSample nodes for explicit condition-specific samples and measured samples.
+- Put explicit scalar performance values on ExperimentalSample whenever clearly sample-specific.
+
+2. Shared knowledge layer:
+- Also retain reusable family-level findings when they are explicitly stated and scientifically meaningful.
+- Shared non-scalar findings may be attached to MaterialSystem or a family-level ExperimentalSample if they describe the whole sample family rather than one specific condition.
+- This shared layer is encouraged in order to preserve more useful nodes.
+
+Do not force every meaningful sentence into sample-specific scalar facts.
+If a conclusion is clearly shared across a sample family, keep it as a shared finding rather than dropping it.
+
+--------------------------------
+DOCUMENT BOUNDARY RULE
+--------------------------------
+
+If the chunk contains multiple papers or clearly separated studies:
+- create separate SourceDocument entities,
+- keep MaterialSystem and ExperimentalSample families separated by SourceDocument,
+- do not merge samples across papers unless identity is explicit.
+
+Preferred SourceDocument naming:
+- Doc_1
+- Doc_2
+- Doc_3
+
+Recommended minimal relations:
+- ExperimentalSample reported_in SourceDocument
+- MaterialSystem reported_in SourceDocument
+- DesignOutput reported_in SourceDocument
+
+--------------------------------
+ENTITY CREATION RULES
+--------------------------------
+
+Create entities only when they are explicit and scientifically useful.
+
+1. SourceDocument
+Use for each paper/study.
+
+2. MaterialSystem
+Use for the general material platform or sample family.
+Examples:
+- System_Fe3C_microflakes
+- System_FeCu_GDY
+- System_Co_SA_graphene
+
+3. ExperimentalSample
+Use for:
+- explicit sample codes,
+- explicit condition-specific samples,
+- control samples,
+- representative samples with explicit measured performance.
+
+4. MaterialComponent / CarbonSupport
+Use for explicit components and supports.
+
+5. SynthesisMethod
+Use for named synthesis routes.
+
+6. ProcessingCondition
+Use for reusable process concepts.
+Examples:
+- electrochemical dealloying
+- isothermal quenching
+- annealing
+- H2/Ar atmosphere
+- paraffin mixing
+
+7. StructureConcept
+Use for reusable structural, crystallographic, morphological, compositional, or microstructural concepts.
+Examples:
+- irregular_flake_structure
+- high_aspect_ratio
+- shape_anisotropy
+- orthorhombic_crystal_structure
+- strip_domain_structures
+- conductive_network
+- in_plane_anisotropy
+- crystal_orientation
+
+8. CharacterizationMethod
+Use normalized short method names whenever possible.
+Examples:
+- XRD
+- SEM
+- TEM
+- HR-TEM
+- EDS
+- L-TEM
+- VSM
+- VNA
+- LLG_Fitting
+- Transmission_Line_Theory
+
+9. CharacterizationFinding
+Use for explicit findings supported by a method.
+Examples:
+- Orthorhombic_Phase_Confirmed
+- Strip_Domain_Observed
+- High_Aspect_Ratio_Observed
+- Conductive_Network_Formed
+- Ferromagnetic_Resonance_Detected
+- Phase_Identity_Matches_PDF_85_1317
+
+10. EMProperty
+Use for reusable EM-property concepts, not raw scalar values.
+Examples:
+- Reflection_Loss
+- Effective_Absorption_Bandwidth
+- Complex_Permittivity
+- Complex_Permeability
+- Dielectric_Loss
+- Magnetic_Loss
+- Impedance_Matching
+
+11. LossMechanism
+Use for explicit mechanisms.
+Examples:
+- ferromagnetic_resonance
+- natural_resonance
+- magnetic_loss
+- polarization
+- dielectric_loss
+- conductive_loss
+
+12. Limitation
+Use for explicit negative constraints.
+Examples:
+- poor_dispersion
+- impedance_mismatch
+- sintering
+- particle_aggregation
+
+13. DesignOutput
+Use only for recommended or predicted designs, not measured samples.
+
+--------------------------------
+NAMING RULES
+--------------------------------
+
+Prefer one canonical family name plus explicit sample names.
+
+1. For a material family:
+- System_Fe3C_microflakes
+- System_FeCu_GDY
+- System_HCNF_HEA
+
+2. For explicit samples:
+- Sample_Fe3C_700
+- Sample_Fe3C_625
+- Sample_Fe3C_550
+- Sample_FeCu_GDY_T1000
+- Sample_Co_SA_graphene
+
+3. If the source contains slight formatting or OCR variation, normalize to the nearest obvious scientific identity.
+Examples:
+- FC-550 -> Sample_Fe3C_550
+- F3C-550 -> Sample_Fe3C_550
+- FeC microflakes -> System_Fe3C_microflakes or Sample_Fe3C_x if clearly same family
+- Fe3C micro-flakes -> Fe3C microflakes
+
+4. Family-level shared conclusions may stay on:
+- MaterialSystem
+or
+- one family-level ExperimentalSample
+if they are non-scalar and clearly shared.
+
+--------------------------------
+SAMPLE-SPECIFIC VS SHARED FACT RULE
+--------------------------------
+
+Use this decision rule:
+
+A. If the text gives:
+- an explicit sample code or explicit condition,
+and
+- a clearly corresponding numeric value,
+store it on the matching ExperimentalSample.
+
+B. If the text gives:
+- a shared conclusion across the whole family,
+and
+- it is non-numeric or broadly descriptive,
+store it as:
+- StructureConcept
+- CharacterizationFinding
+- EMProperty
+- LossMechanism
+linked to the family-level MaterialSystem or family-level ExperimentalSample.
+
+Examples of shared findings suitable for family/system level:
+- irregular flake structure
+- orthorhombic crystal structure
+- conductive network tendency
+- shape anisotropy
+- magnetic-loss-dominated behavior
+- strip domain structures observed in the family discussion
+
+This rule is intended to preserve more useful nodes while keeping numeric sample facts clean.
+
+--------------------------------
+SCALAR ATTRIBUTE RULE
+--------------------------------
+
+Store explicit scalar facts as attributes on ExperimentalSample whenever clearly sample-specific.
+
+Prefer these fields:
+- annealing_temperature
+- annealing_time
+- filler_loading
+- atmosphere
+- particle_size
+- phase_description
+- composition_note
+- crystal_space_group
+- zone_axis
+- easy_axis
+- secondary_easy_axis
+- specific_surface_area
+- pore_volume
+- pore_size_distribution
+- saturation_magnetization
+- coercivity
+- RL_min_value
+- RL_min_frequency
+- EAB_value
+- EAB_frequency_range
+- matching_thickness
+- absorption_rate
+- epsilon_real
+- epsilon_imag
+- mu_real
+- mu_imag
+- property_note
+- performance_note
+- remarks
+
+Do not create scalar value nodes.
+
+If a scalar value is useful but cannot be safely mapped to one existing field, store it in remarks instead of forcing it into a wrong numeric field.
+
+--------------------------------
+FIELD INTERPRETATION RULE
+--------------------------------
+
+Interpret fields conservatively:
+
+- RL_min_value = reflection loss value in dB
+- RL_min_frequency = single frequency point for RL_min
+- EAB_value = bandwidth width in GHz
+- EAB_frequency_range = GHz interval
+- matching_thickness = absorber thickness in mm
+- epsilon_real / epsilon_imag = complex permittivity quantities
+- mu_real / mu_imag = complex permeability quantities
+
+Do not force obviously mismatched values into these fields.
+When a sentence is descriptive rather than a clean numeric property statement, prefer:
+- CharacterizationFinding
+- StructureConcept
+- LossMechanism
+- EMProperty
+- remarks
+
+rather than coercing it into a numeric attribute.
+
+--------------------------------
+CHARACTERIZATION EXTRACTION RULE
+--------------------------------
+
+When a method and its scientific conclusion are explicitly stated, preserve both.
+
+Preferred patterns:
+- ExperimentalSample characterized_by CharacterizationMethod
+- CharacterizationMethod supports_finding CharacterizationFinding
+- ExperimentalSample has_finding CharacterizationFinding
+- ExperimentalSample has_structure_concept StructureConcept
+- ExperimentalSample has_em_property EMProperty
+- ExperimentalSample associated_with_mechanism LossMechanism
+
+Examples:
+- XRD -> Orthorhombic_Phase_Confirmed
+- L-TEM -> Strip_Domain_Observed
+- TEM -> High_Aspect_Ratio_Observed
+- VSM -> Coercivity_Difference_Observed
+- VNA -> Reflection_Loss_Measured
+- LLG_Fitting -> Ferromagnetic_Resonance_Detected
+
+--------------------------------
+NODE-COUNT EXPANSION RULE
+--------------------------------
+
+To preserve a richer graph, you are encouraged to keep:
+- shared structural concepts,
+- shared characterization findings,
+- shared EM-property concepts,
+- family-level mechanism nodes,
+- reusable process nodes,
+as long as they are explicitly grounded in the text and scientifically meaningful.
+
+Do NOT collapse everything into only:
+- sample + scalar attributes.
+
+A richer graph is preferred when the added nodes are:
+- reusable,
+- explicit,
+- interpretable,
+- and connected.
+
+--------------------------------
+RELATION DIRECTION RULES
+--------------------------------
+
+Use relation directions as follows:
+
+- ExperimentalSample reported_in SourceDocument
+- MaterialSystem reported_in SourceDocument
+- ExperimentalSample derived_from_system MaterialSystem
+- ExperimentalSample has_component MaterialComponent
+- ExperimentalSample supported_on CarbonSupport
+- ExperimentalSample prepared_by SynthesisMethod
+- ExperimentalSample processed_under ProcessingCondition
+- ExperimentalSample has_structure_concept StructureConcept
+- ExperimentalSample characterized_by CharacterizationMethod
+- CharacterizationMethod supports_finding CharacterizationFinding
+- ExperimentalSample has_finding CharacterizationFinding
+- ExperimentalSample has_em_property EMProperty
+- ExperimentalSample associated_with_mechanism LossMechanism
+- ExperimentalSample limited_by Limitation
+- ExperimentalSample compared_with ExperimentalSample
+- SourceDocument proposes_design DesignOutput
+- DesignOutput targets_system MaterialSystem
+
+Only CharacterizationMethod may be the subject of supports_finding.
+
+--------------------------------
+METHOD NORMALIZATION RULE
+--------------------------------
+
+Prefer these normalized method names:
+- XRD
+- SEM
+- TEM
+- HR-TEM
+- EDS
+- L-TEM
+- VSM
+- VNA
+- LLG_Fitting
+- Transmission_Line_Theory
+
+If the text gives a longer name such as “vector network analyzer” or “Lorentz transmission microscopy”, you may normalize it to the short form.
+Do not overfocus on instrument models.
+
+--------------------------------
+ANTI-DUPLICATION RULE
+--------------------------------
+
+1. Do not duplicate the same fact as both node and attribute.
+2. Do not create scalar nodes like RL_-52dB or Size_45nm.
+3. Merge small OCR/formatting variants when the intended identity is clear.
+4. Keep one canonical family node plus explicit sample nodes.
+5. It is acceptable to keep both:
+- a family-level shared finding
+and
+- sample-level scalar attributes,
+because they serve different graph roles.
+
+--------------------------------
+UNIT NORMALIZATION RULE
+--------------------------------
+
+Normalize units to:
+- temperature: °C
+- time: h, min, s
+- length/thickness/size: nm, μm, mm
+- frequency: GHz
+- reflection loss: dB
+- bandwidth: GHz
+- loading: wt%
+- specific surface area: m²/g
+- pore volume: cm³/g
+- magnetization: emu/g
+- coercivity: Oe
+
+--------------------------------
+OUTPUT PRIORITY
+--------------------------------
+
+Prioritize:
+1. explicit sample-level numeric performance
+2. shared family-level structural findings
+3. characterization-supported findings
+4. reusable EM-property nodes
+5. mechanism nodes
+6. process nodes
+
+Schema:
+```{schema}```
+
+Text Chunk:
+```{chunk}```

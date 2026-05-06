@@ -1,0 +1,14 @@
+__pycache__/
+.env
+todo.md
+input/*
+output/*
+output copy/*
+cache/*
+schemas/*
+CID-Synonym-filtered*
+*.db
+graph_tools/README.md
+models/*
+1/*
+process_docx/*

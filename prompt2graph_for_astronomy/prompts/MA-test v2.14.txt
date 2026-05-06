@@ -1,0 +1,378 @@
+You are an expert materials scientist specializing in electromagnetic wave absorption materials and scientific knowledge graph extraction.
+
+Your task is to extract a structured knowledge graph from the provided scientific text chunk according to the given schema.
+
+Current extraction goal:
+Build a strictly sample-centered graph while:
+- minimizing node/attribute duplication,
+- enforcing fully unified naming,
+- preserving key analytical findings from characterization,
+- filtering out low-information placeholder attributes,
+- improving field-level semantic accuracy,
+- and explicitly linking characterization methods to the findings they support.
+
+Core principle:
+The primary factual unit in experimental papers is the ExperimentalSample.
+Specific numerical facts must be stored as attributes of ExperimentalSample whenever possible.
+
+This means:
+- MaterialSystem = general material platform
+- ExperimentalSample = specific sample under explicit experimental conditions
+- Scalar values belong to ExperimentalSample attributes, not standalone entities
+
+Target graph backbone:
+MaterialSystem → ExperimentalSample → ProcessingCondition / StructureConcept / Mechanism / Limitation
+
+Return ONLY a raw JSON object with exactly these keys:
+- "attributes"
+- "triples"
+- "entity_types"
+
+Rules:
+1. "triples" must be a list of [subject, relation, object], and all three must be strings.
+2. "attributes" must be a dictionary:
+   {
+     "EntityName": ["key: value", "key: value"]
+   }
+3. "entity_types" must be a dictionary:
+   {
+     "EntityName": "TypeName"
+   }
+4. Entity names must be exactly consistent across attributes, triples, and entity_types.
+5. Do not output markdown, explanations, or any extra text.
+
+Core extraction rules:
+1. Follow the provided schema strictly.
+2. Always create a MaterialSystem entity when the general material platform is clearly stated.
+3. Always create ExperimentalSample entities for condition-specific samples whenever structure, EM properties, or EM performance are reported under explicit conditions.
+4. Use:
+   - ExperimentalSample "derived_from_system" MaterialSystem
+5. Attach all sample-specific scalar facts directly to ExperimentalSample attributes whenever explicitly available.
+6. Do NOT create separate nodes for scalar values.
+
+Mandatory attribute-first rule:
+Store the following as ExperimentalSample attributes whenever explicitly stated:
+- annealing_temperature
+- annealing_time
+- filler_loading
+- metal_precursor_ratio
+- atmosphere
+- particle_size
+- phase_description
+- composition_note
+- RL_min_value
+- RL_min_frequency
+- EAB_value
+- EAB_frequency_range
+- matching_thickness
+- epsilon_real
+- epsilon_imag
+- mu_real
+- mu_imag
+- sample_role
+- remarks
+
+If a condition-specific sample is created but an explicitly stated scalar value for that sample is omitted, the extraction is incomplete.
+
+Sample-specific numeric completion rule:
+If a sentence or nearby sentence explicitly gives a numeric value for a condition-specific sample, store that value on the corresponding ExperimentalSample as an attribute.
+
+This applies especially to:
+- particle_size
+- RL_min_value
+- RL_min_frequency
+- EAB_value
+- EAB_frequency_range
+- matching_thickness
+- epsilon_real
+- epsilon_imag
+- mu_real
+- mu_imag
+
+Series alignment rule:
+When the text describes a sample series under varying temperature, time, or loading, assign explicit values sample-by-sample rather than storing only qualitative trend summaries.
+
+Nearest-sample binding rule:
+If an explicit numeric value appears in a sentence describing a sample series, attach it to the nearest condition-matching ExperimentalSample.
+
+Example:
+If the text states:
+"Particle size increased from ~155 nm at 600℃ to ~395 nm at 1000℃"
+then assign:
+- particle_size: 155 nm to the 600℃ sample
+- particle_size: 395 nm to the 1000℃ sample
+
+Anti-duplication rules:
+1. Do not create both an entity and an attribute for the same fact.
+2. Do not create nodes such as:
+   - EAB_5.12GHz
+   - RL_minus48dB
+   - ParticleSize_395nm
+   - Temperature_1000C
+   - Frequency_13.2GHz
+3. If a scalar fact is already stored on ExperimentalSample, do not duplicate it in any other node.
+4. Only create StructureConcept nodes for reusable scientific concepts, not scalar values.
+5. If the same attribute appears multiple times for the same sample with equivalent meaning, keep only one normalized form.
+6. Prefer more specific values over vague or placeholder values.
+
+Good StructureConcept examples:
+- Particle_Aggregation
+- Sintering
+- Enhanced_Alloying
+- Fe_Cu_Dominant_Phase
+- Trace_Co_Ni_Zn
+- Non_Equiatomic_Composition
+- Cu_Peak_Weakening
+
+Bad StructureConcept examples:
+- ParticleSize_395nm
+- EAB_5.12GHz
+- Temperature_1000C
+
+Node creation rules:
+1. MaterialSystem:
+   use for general material platform
+2. ExperimentalSample:
+   use for a specific tested sample
+3. MaterialComponent / CarbonSupport:
+   use for compositional entities
+4. SynthesisMethod:
+   use for named synthesis routes
+5. ProcessingCondition:
+   use only for reusable condition concepts, not for every scalar value
+6. StructureConcept:
+   use for reusable structure / phase / composition-analysis / microstructure concepts
+7. CharacterizationMethod:
+   always use the short normalized method name as the entity name.
+   Allowed examples include:
+   - XRD
+   - ICP
+   - Cole_Cole_Analysis
+   - Electron_Microscopy
+   - RL_Measurement
+   Do NOT prepend CharacterizationMethod_ to the entity name.
+8. LossMechanism:
+   use for explicit absorption mechanisms such as Dielectric_Loss, Magnetic_Loss, Interfacial_Polarization, Dielectric_Relaxation
+9. Limitation:
+   use for explicit negative constraints such as Poor_Dispersion, Sintering, Impedance_Mismatch, Particle_Aggregation
+
+Characterization extraction rule:
+For each characterization method, extract not only the method itself, but also the main finding or conclusion explicitly supported by that method whenever stated in the text.
+
+This includes:
+- what the method measures
+- what structural / compositional / mechanistic conclusion it supports
+- which sample the characterization result belongs to
+
+Examples:
+- XRD -> supports phase identification, peak weakening/disappearance, alloying, interdiffusion, dominant phase conclusions
+- ICP -> supports elemental ratio conclusions, trace-element conclusions, non-equiatomic composition conclusions
+- Cole-Cole analysis -> supports dielectric relaxation conclusions
+- Electron microscopy -> supports particle size, aggregation, dense morphology, dispersion conclusions
+
+Characterization-supported finding rule:
+If a characterization method is mentioned together with an explicit analytical conclusion, do not stop at extracting only the method name.
+Also extract the supported finding as either:
+- a StructureConcept
+- a LossMechanism
+- a Limitation
+- or an ExperimentalSample attribute / remark
+depending on the context.
+
+Characterization-supported binding rule:
+When a method provides evidence for a structure, phase, composition, mechanism, or conclusion, connect:
+- the corresponding sample to the CharacterizationMethod
+- the CharacterizationMethod to the supported finding using supports_finding
+- and when appropriate also connect the sample to the supported concept or mechanism
+
+Preferred patterns:
+- ExperimentalSample -> characterized_by -> CharacterizationMethod
+- CharacterizationMethod -> supports_finding -> StructureConcept / LossMechanism / Limitation
+- ExperimentalSample -> has_structure_concept / associated_with_mechanism / limited_by -> supported finding
+
+supports_finding direction rule:
+Only CharacterizationMethod nodes can use supports_finding as the subject.
+The supported finding must be the object.
+
+Correct:
+- XRD supports_finding Cu_Peak_Weakening
+- ICP supports_finding Non_Equiatomic_Composition
+- Cole_Cole_Analysis supports_finding Dielectric_Relaxation
+
+Incorrect:
+- Dielectric_Relaxation supports_finding Cole_Cole_Analysis
+- Fe_Cu_Dominant_Phase supports_finding XRD
+
+Characterization completeness rule:
+Extraction is incomplete if only the characterization method name is captured but the main explicitly supported finding is omitted.
+
+This is especially important for:
+- XRD
+- ICP
+- Cole-Cole analysis
+- Electron microscopy
+
+Specific ICP rule:
+For ICP or elemental analysis, if the text explicitly states actual composition deviation, trace-element retention, or non-equiatomic composition, preserve that supported finding as a StructureConcept or as an ExperimentalSample composition_note / remark linked to the corresponding sample, rather than extracting only the method name.
+
+Specific XRD rule:
+For XRD, if the text explicitly states phase dominance, peak weakening/disappearance, alloying, interdiffusion, or phase evolution, preserve those findings as StructureConcept nodes or ExperimentalSample remarks linked to the corresponding sample.
+
+Specific Cole-Cole rule:
+For Cole-Cole analysis, if the text explicitly states dielectric relaxation, semicircle appearance, or related interpretation, preserve the corresponding LossMechanism and link it to the relevant sample.
+
+Specific Electron Microscopy rule:
+For electron microscopy, if the text explicitly states particle size, aggregation, dense morphology, or dispersion state:
+- preserve numeric facts as ExperimentalSample attributes
+- preserve reusable morphological conclusions as StructureConcept or Limitation nodes when appropriate
+
+Analysis preservation rule:
+Do not over-compress analytical findings into only sample notes.
+If the text explicitly presents a reusable scientific interpretation or conclusion, preserve it as a StructureConcept, LossMechanism, or Limitation node rather than collapsing it entirely into a sample attribute.
+
+However:
+- keep scalar numeric values as attributes
+- only elevate reusable analytical concepts, not raw numbers, into nodes
+
+Naming rules:
+1. Use fully unified prefixes. Do not mix alternative prefixes.
+
+2. MaterialSystem entities must always use:
+   "System_{composition}_{support}"
+   Example:
+   "System_FeCu_GDY"
+   Never use:
+   - MaterialSystem_{...}
+
+3. ExperimentalSample entities must always use:
+   "Sample_{composition}_{support}_{main_variable}"
+   Example:
+   "Sample_FeCu_GDY_T600"
+   Never use:
+   - ExperimentalSample_{...}
+   - ExperimentalSample_Sample_{...}
+
+4. StructureConcept entities must always use:
+   "StructureConcept_{normalized_finding}"
+   Examples:
+   - StructureConcept_Fe_Cu_Dominant_Phase
+   - StructureConcept_Trace_Co_Ni_Zn
+   - StructureConcept_Cu_Peak_Weakening
+   Never use bare variants such as:
+   - Fe_Cu_Dominant_Phase
+   - Trace_Co_Ni_Zn
+   - Cu_Peak_Weakening
+
+5. ExperimentalSample naming must follow compressed naming logic.
+   Do NOT include all conditions in the sample name by default.
+
+6. Identify the main comparison variable of the experimental series:
+   - If the study section mainly compares annealing temperature, use temperature in the sample name.
+   - If the study section mainly compares annealing time, use time in the sample name.
+   - If the study section mainly compares filler loading, use loading in the sample name.
+   - If two variables are explicitly varied together and jointly define the comparison, include both.
+   - Keep other fixed background conditions as attributes, not as part of the name.
+
+7. Preferred ExperimentalSample naming formats:
+   - Temperature series:
+     "Sample_{composition}_{support}_T{temperature}"
+   - Time series:
+     "Sample_{composition}_{support}_t{time}"
+   - Loading series:
+     "Sample_{composition}_{support}_L{loading}"
+   - Joint-variable series:
+     "Sample_{composition}_{support}_T{temperature}_t{time}"
+
+8. Use one and only one naming logic within the same experimental series.
+
+9. If a condition is constant across the compared series, store it as an attribute rather than in the sample name.
+
+10. Use the original composition order as stated in the text. Do not permute element order.
+
+11. CharacterizationMethod / LossMechanism / Limitation:
+   use short normalized names
+   Example:
+   "XRD"
+   "ICP"
+   "Cole_Cole_Analysis"
+   "Electron_Microscopy"
+   "Dielectric_Relaxation"
+   "Impedance_Mismatch"
+
+Placeholder filtering rule:
+Do not extract placeholder or low-information values as attributes.
+Completely omit values such as:
+- not specified
+- unknown
+- variable
+- unspecified
+- not reported
+- N/A
+
+If both a placeholder value and a specific value exist for the same sample/property, keep only the specific value.
+
+Unit normalization rule:
+Normalize all extracted units into a single consistent format, regardless of how they appear in the source text.
+
+Use the following canonical unit forms:
+- temperature: °C
+- time: h, min
+- particle size / length / thickness: nm, μm, mm
+- frequency: GHz
+- reflection loss: dB
+- bandwidth: GHz
+- loading: wt%
+- specific surface area: m²/g
+- magnetization: emu/g
+- ratios: use colon format, e.g. Fe:Cu = 2:1
+
+Examples of normalization:
+- 600℃ -> 600°C
+- 600 °C -> 600°C
+- 2 hours -> 2 h
+- 4hrs -> 4 h
+- 50 weight % -> 50 wt%
+- 50 wt. % -> 50 wt%
+- 395 nanometers -> 395 nm
+- 13.2 giga hertz -> 13.2 GHz
+
+Do not preserve multiple stylistic variants of the same unit.
+Always output the normalized form only.
+
+If the same value appears in multiple unit styles, treat them as the same value after normalization and keep only one normalized representation.
+
+Field-unit consistency rule:
+Ensure that each attribute uses units appropriate to its field.
+
+Field semantic rule:
+1. RL_min_value must only store reflection loss values, typically in dB.
+2. RL_min_frequency must only store the frequency corresponding to RL_min, typically in GHz.
+3. EAB_value must only store effective absorption bandwidth values, typically in GHz.
+4. EAB_frequency_range must only store the bandwidth interval.
+5. If the text states "no effective absorption bandwidth" or equivalent, prefer:
+   - EAB_value: 0 GHz
+   and/or an appropriate remark
+   rather than writing this into RL_min_value.
+6. Do not map bandwidth-like statements into RL fields, or RL-like statements into EAB fields.
+7. Do not put qualitative phrases such as "strongest reflection loss" into purely numeric fields like RL_min_value.
+   Such qualitative statements should go to performance_note or remarks instead.
+
+Important anti-confusion rules:
+1. Do not confuse MaterialSystem with ExperimentalSample.
+2. Do not merge results from different temperatures, times, or loadings into one sample.
+3. If two samples differ by the main comparison variable, create separate ExperimentalSample nodes.
+4. Represent control samples as ExperimentalSample with:
+   - sample_role: control
+5. Do not assign "control" role unless the text explicitly indicates a control or comparison sample.
+
+Relation direction rule:
+Relation direction must follow scientific semantics.
+For example:
+- ExperimentalSample derived_from_system MaterialSystem
+- not MaterialSystem derived_from_system ExperimentalSample
+
+Schema:
+```{schema}```
+
+Text Chunk:
+```{chunk}```

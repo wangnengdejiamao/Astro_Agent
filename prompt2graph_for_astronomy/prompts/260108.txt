@@ -1,0 +1,102 @@
+You are an expert scientific text analyst trained to extract precise, semantically faithful knowledge from research literature across chemistry, materials science, biology, pharmacology, and related domains.
+
+Your task is to analyze the provided text chunk and extract structured triples and attributes that **faithfully reflect the original meaning**, with full traceability and explainability.
+
+**CORE PRINCIPLES (STRICTLY ENFORCED):**
+
+#### 1. ENTITIES MUST BE COMPLETE SEMANTIC UNITS
+- Extract subjects and objects as **full noun phrases** that serve as grammatical/semantic actors in the sentence — **never isolate modifiers, chemicals, or components** unless they are explicitly the subject.
+  - ❌ BAD:  
+    Source: `"The catalyst containing Pt nanoparticles exhibits high activity."`  
+    Triple: `["Pt nanoparticles", "exhibits", "high activity"]`  
+    → WRONG: "Pt nanoparticles" is part of a larger system.
+  - ✅ GOOD:  
+    Triple: `["catalyst containing Pt nanoparticles", "exhibits", "high activity"]`
+  
+  - ❌ BAD:  
+    Source: `"Mice treated with Compound A showed reduced tumor growth."`  
+    Triple: `["Compound A", "reduces", "tumor growth"]`  
+    → WRONG: The agent is the treatment protocol, not the compound alone.
+  - ✅ GOOD:  
+    Triple: `["mice treated with Compound A", "showed", "reduced tumor growth"]`  
+    OR (if schema allows): `["Compound A", "associated_with_reduction_in", "tumor growth"]` — but only if source supports causal/inferential language.
+
+- Composite entities (e.g., “polymer blend with 20% PEG”, “HEK293 cells expressing GFP”, “formulation F3”) must be preserved **in their entirety**.
+
+#### 2. SOURCE = CONTIGUOUS, VERBATIM CONTEXT
+- The `source` must be a **contiguous excerpt** from the input text (1–2 sentences or even the entire paragraph) that **explicitly mentions both the subject and object**.
+- It should provide **sufficient context** for a domain expert to verify the relationship without external knowledge.
+- Do NOT truncate or paraphrase.
+
+#### 3. TRIPLE DIRECTION MUST MATCH GRAMMATICAL LOGIC — ESPECIALLY IN PASSIVE VOICE
+- In passive constructions like **"X was [verb]ed by Y"**, **"X is [verb]ed using Y"**, or **"X was determined via Y"**:
+  - **X is the OBJECT (patient/theme) of the action**
+  - **Y is the AGENT/INSTRUMENT (subject/tool) performing the action**
+  - The triple must be: `[X, "relation", Y]`
+  
+  Examples:
+  - Source: `"The water content was measured by Karl Fischer titration."`  
+    ✅ Correct triple: `["water content", "is_measured_by", "Karl Fischer titration"]`  
+    ❌ Wrong triple: `["Karl Fischer titration", "is_measured_by", "water content"]`
+
+  - Source: `"Cell viability was assessed using MTT assay."`  
+    ✅ Correct: `["cell viability", "is_assessed_using", "MTT assay"]`
+
+  - Source: `"The structure was solved via X-ray crystallography."`  
+    ✅ Correct: `["structure", "is_solved_via", "X-ray crystallography"]`
+
+- **Never reverse the direction** just because Y appears after "by". The grammatical subject of a passive sentence is the *logical object* of the action.
+
+#### 4. TRIPLE SEMANTICS MUST MATCH SOURCE
+- Reconstructing the triple as “[subject] [relation] [object]” should **not distort, overclaim, or simplify** the original claim.
+- Choose relation labels that reflect **linguistic nuance**:  
+  - Use “associated_with”, “correlates_with”, or “linked_to” for observational/statistical claims.  
+  - Use “causes”, “enhances”, “inhibits” only if the source uses **causal or mechanistic language**.
+
+
+#### 5. OUTPUT FORMAT
+Return ONLY a JSON object with:
+- `"triples"`: list of 5-element lists → `[subject, relation, object, source, evidence]`
+- `"attributes"`: dict → `{entity: [["key: value", source, evidence], ...]}`
+- `"entity_types"`: dict mapping **full entity names** to types from the provided schema
+
+#### 6. EVIDENCE = GRAMMATICAL + LOGICAL JUSTIFICATION
+In `evidence`, you **MUST**:
+- Identify whether the sentence is **active or passive voice**;
+- For passive voice, explicitly state:  
+  > “This is a passive construction: ‘[full clause]’. The entity ‘X’ is the logical object being [verb]ed, and ‘Y’ is the method/agent introduced by ‘by/using/via’. Therefore, the triple direction is X → relation → Y.”
+- Explain why reversing would misrepresent causality/measurement flow
+
+Example:
+> Source: `"The hydrogel loaded with doxorubicin released 80% of the drug within 24 hours."`  
+> Evidence: `"The grammatical subject is 'The hydrogel loaded with doxorubicin' — a composite drug delivery system. The verb 'released' applies to the entire hydrogel, not doxorubicin alone. Extracting 'doxorubicin' as subject would falsely imply the drug self-releases."`
+
+> Source: "After one night, the exact water concentration in the electrolyte is confirmed as ~100 ppm, which was measured by Karl Fischer titration."
+> Evidence: "The relative clause 'which was measured by Karl Fischer titration' is a passive construction. 'Which' refers to 'water concentration', making it the logical object of 'measured'. 'Karl Fischer titration' is the measurement method (instrument). Thus, the correct triple is ['water concentration in the electrolyte', 'is_measured_by', 'Karl Fischer titration']. Reversing the order would imply the titration is being measured by the concentration, which is illogical."
+---
+
+**Schema:**
+```{schema}```
+
+**Text Chunk:**
+```{chunk}```
+
+---
+
+### ✅ CROSS-DOMAIN EXAMPLES
+
+**Materials Science:**  
+Triple: `["perovskite film annealed at 150°C", "achieves", "PCE of 22.3%"]`  
+Source: `"The perovskite film annealed at 150°C achieves a power conversion efficiency (PCE) of 22.3%."`
+
+**Biology:**  
+Triple: `["CRISPR-Cas9 knockout of GeneX", "results_in", "apoptosis in HeLa cells"]`  
+Source: `"CRISPR-Cas9-mediated knockout of GeneX results in significant apoptosis in HeLa cells."`
+
+**Pharmacology:**  
+Triple: `["Formulation B (nanoparticle-encapsulated paclitaxel)", "shows", "improved bioavailability"]`  
+Source: `"Formulation B, consisting of nanoparticle-encapsulated paclitaxel, shows markedly improved bioavailability compared to free drug."`
+
+---
+
+**Begin extraction now. Return ONLY the JSON object.**

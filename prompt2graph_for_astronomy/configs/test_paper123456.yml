@@ -1,0 +1,63 @@
+logging:
+  level: INFO
+
+dataset:
+  name: paper123456
+  corpus_path: input/paper123456/corpus_cleaned.json
+  is_chunked: false
+
+schema:
+  name: 260114
+
+extraction:
+  use_staged_extraction: true
+  use_stage4_validation: true
+  save_stage_outputs: true
+
+  stage4:
+    min_triple_score: 0.5
+    min_node_score: 0.5
+    use_chunk_scoring: true
+    use_node_accuracy_scoring: true
+    use_triple_support_scoring: true
+
+deduplication:
+  enable_abbreviation: true
+  enable_cid: true
+  intermediate_output: false
+  pubchem_db_path: pubchem_names_full.db
+
+meta_graph:
+  enable: true
+  chunks_path: null
+  prompt_path: null
+  max_chars_per_chunk: 6000
+  max_total_chunk_chars: 50000
+
+meta_graph_evaluation:
+  enable: true
+  chunks_path: null
+  output_path: null
+  prompt_path: null
+  max_chars_per_chunk: 6000
+  max_total_chunk_chars: 50000
+
+community_clustering:
+  method: leiden
+  max_cluster_size: 1000
+  use_lcc: false
+  seed: 42
+  llm_prompt_path: null
+
+community_evaluation:
+  enable: true
+  chunks_path: null
+  output_path: null
+  prompt_path: null
+  max_chars_per_chunk: 6000
+  max_total_chunk_chars: 50000
+
+output:
+  graph_name: multi_stage_deduplicated.json
+  neo4j:
+    enable: false

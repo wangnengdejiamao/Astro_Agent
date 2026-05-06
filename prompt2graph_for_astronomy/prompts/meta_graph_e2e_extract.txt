@@ -1,0 +1,80 @@
+You are an expert in scientific knowledge graph analysis for chemistry, materials science, and electrochemistry.
+
+Your task is to identify **semantic relationships between knowledge graph triples** based on the original paper context.
+
+---
+
+### INPUT
+
+You are given:
+
+1. **Triples** – A numbered list of entity-to-entity facts from a scientific knowledge graph. Each triple has the form [Subject --relation--> Object].
+
+2. **Paper context** – Original text chunks from the paper, which provide the semantic context for the triples.
+
+---
+
+### TRIPLES
+
+```json
+{triples_json}
+```
+
+Each element: `{{"idx": 0, "id": "abc123", "subject": "...", "relation": "...", "object": "...", "source": "...", "chunk_ids": ["..."]}}`
+
+---
+
+### PAPER CONTEXT (chunks)
+
+```
+{chunks_text}
+```
+
+---
+
+### SEMANTIC  
+
+For each pair of triples (i, j) where i < j, determine if they have a meaningful semantic relationship based on the paper context.
+
+- **Relation types**: Use **only** the following key relations to judge whether two triples are semantically related. Do NOT invent new relation labels:
+  - `causes`: one triple causes or leads to the other (e.g., mechanism chain).
+  - `supports`: one triple provides evidence or supports the other.
+  - `contradicts`: one triple contradicts the other.
+  - `elaborates`: one triple elaborates or refines the other (e.g., same concept, different detail).
+  - `compares_with`: the two triples describe comparable or contrasting aspects.
+  - `enables`: one triple enables or facilitates the effect described in the other.
+- **Important**: Only output pairs that have a meaningful relationship. Do NOT include pairs with no clear relationship.
+
+- **Hint – discourse connectives**: Pay attention to connectives such as *because*, *thus*, *therefore*, *which*, *leading to*. They often link two clauses that map to different triples; the connective indicates the relationship. For example: "A hinders B **because** C complicates D" → Triple (C--complicates-->D) **causes** Triple (A--hinders-->B); the connective *because* signals that the second clause (C complicates D) leads to the first (A hinders B).
+
+---
+
+### OUTPUT FORMAT
+
+Return **only** a JSON array. Each element must have:
+
+- `triple_i`: the index (int) of the first triple
+- `triple_j`: the index (int) of the second triple (must be > triple_i)
+- `relation`: one of the key relation types (causes, supports, contradicts, elaborates, compares_with, enables)
+- `reasoning`: brief explanation (1–2 sentences)
+
+Example (from graph_doc_0000.json, chunk ibkphgpd):
+
+- Triple 0: In(NO3)3·6H2O --improves--> solid electrolyte interphase
+- Triple 12: solid electrolyte interphase --inhibits--> lithium dendrite growth
+
+Example (discourse connective *because*):
+
+- Original: "However, this encasement hinders the precise control of catalytic capacity **because** carbon's inherent σ-bonding complicates direct changes to the material's surface atomic and electronic structure."
+- Triple 3: encasement --hinders--> precise control of catalytic capacity (clause before *because*)
+- Triple 7: carbon's inherent σ-bonding --complicates--> direct changes to surface atomic and electronic structure (clause after *because*)
+- Relation: triple 7 **causes** triple 3—*because* indicates the clause after it (σ-bonding complicates...) leads to the clause before it (encasement hinders...); use reasoning to clarify causal direction when needed.
+
+```json
+[
+  {{"triple_i": 0, "triple_j": 12, "relation": "causes", "reasoning": "Triple 0: In(NO3)3·6H2O improves SEI formation ('this additive contributes to the rapid formation of stable SEI'); Triple 12: SEI inhibits lithium dendrite growth ('form an inorganic-rich SEI that inhibits the growth of lithium dendrites'). The paper states SEI formation 'effectively inhibits' dendrites—formation of SEI (triple 0) directly causes the dendrite inhibition (triple 12), a clear mechanism chain."}},
+  {{"triple_i": 3, "triple_j": 7, "relation": "causes", "reasoning": "Original: 'encasement hinders precise control **because** carbon's σ-bonding complicates direct changes to surface structure.' Clause after *because* (triple 7) leads to the clause before (triple 3); triple 7 causes triple 3."}}
+]
+```
+
+Return ONLY the JSON array. No other text.

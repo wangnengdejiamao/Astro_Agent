@@ -1,0 +1,1870 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Astro Agent | 天体源特性知识图谱</title>
+  <style>
+    :root {
+      --mint: rgb(18, 204, 185);
+      --mint-dark: #079e91;
+      --ink: #172033;
+      --muted: #667085;
+      --line: #e6edf0;
+      --panel: #ffffff;
+      --soft: #f6fbfa;
+      --blue: #5367dd;
+      --amber: #f2a93b;
+      --rose: #de5b7c;
+      --violet: #855bd7;
+      --shadow: 0 16px 42px rgba(23, 32, 51, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    html,
+    body {
+      height: 100%;
+      margin: 0;
+      overflow: hidden;
+    }
+
+    body {
+      color: var(--ink);
+      background:
+        linear-gradient(180deg, rgba(18, 204, 185, 0.08), rgba(255, 255, 255, 0) 260px),
+        #fbfdfd;
+      font-family: "Microsoft YaHei", "PingFang SC", "Segoe UI", Arial, sans-serif;
+      letter-spacing: 0;
+    }
+
+    button,
+    input,
+    select {
+      font: inherit;
+    }
+
+    button {
+      cursor: pointer;
+    }
+
+    *::-webkit-scrollbar {
+      width: 9px;
+      height: 9px;
+    }
+
+    *::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    *::-webkit-scrollbar-thumb {
+      border: 2px solid #fff;
+      border-radius: 999px;
+      background: rgba(18, 204, 185, 0.42);
+    }
+
+    *::-webkit-scrollbar-thumb:hover {
+      background: rgba(7, 158, 145, 0.72);
+    }
+
+    .app-shell {
+      display: grid;
+      grid-template-rows: auto 1fr;
+      height: 100vh;
+      min-height: 720px;
+    }
+
+    .topbar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 18px;
+      padding: 18px 22px 14px;
+      border-bottom: 1px solid rgba(18, 204, 185, 0.18);
+      background: rgba(255, 255, 255, 0.86);
+      backdrop-filter: blur(14px);
+    }
+
+    .brand {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      min-width: 260px;
+    }
+
+    .brand-mark {
+      position: relative;
+      width: 42px;
+      height: 42px;
+      border: 2px solid var(--mint);
+      border-radius: 50%;
+      background: #fff;
+      box-shadow: inset 0 0 0 7px rgba(18, 204, 185, 0.08);
+      flex: 0 0 auto;
+    }
+
+    .brand-mark::before,
+    .brand-mark::after {
+      content: "";
+      position: absolute;
+      border-radius: 50%;
+      background: var(--mint);
+    }
+
+    .brand-mark::before {
+      width: 7px;
+      height: 7px;
+      left: 9px;
+      top: 10px;
+    }
+
+    .brand-mark::after {
+      width: 11px;
+      height: 11px;
+      right: 8px;
+      bottom: 8px;
+      box-shadow: -15px 11px 0 -3px var(--blue);
+    }
+
+    .brand h1 {
+      margin: 0;
+      font-size: 20px;
+      line-height: 1.15;
+      font-weight: 800;
+    }
+
+    .brand p {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .status-strip {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(112px, 1fr));
+      gap: 10px;
+      width: min(860px, 58vw);
+    }
+
+    .stat-pill {
+      border: 1px solid var(--line);
+      background: #fff;
+      border-radius: 8px;
+      padding: 9px 11px;
+      min-width: 0;
+    }
+
+    .stat-pill strong {
+      display: block;
+      font-size: 18px;
+      line-height: 1;
+      white-space: nowrap;
+    }
+
+    .stat-pill span {
+      display: block;
+      margin-top: 5px;
+      color: var(--muted);
+      font-size: 11px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+    .top-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .icon-btn,
+    .solid-btn,
+    .ghost-btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 7px;
+      height: 36px;
+      border-radius: 8px;
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--ink);
+      padding: 0 12px;
+      transition: transform 0.15s ease, border-color 0.15s ease, background 0.15s ease;
+      white-space: nowrap;
+    }
+
+    .icon-btn {
+      width: 42px;
+      height: 42px;
+      padding: 0;
+      font-size: 21px;
+      font-weight: 900;
+      line-height: 1;
+    }
+
+    .solid-btn {
+      border-color: transparent;
+      background: var(--mint);
+      color: #fff;
+      font-weight: 700;
+    }
+
+    .ghost-btn:hover,
+    .icon-btn:hover {
+      border-color: rgba(18, 204, 185, 0.55);
+      background: var(--soft);
+    }
+
+    .solid-btn:hover {
+      transform: translateY(-1px);
+      background: var(--mint-dark);
+    }
+
+    .main-grid {
+      display: grid;
+      grid-template-columns: 312px minmax(520px, 1fr) 386px;
+      gap: 14px;
+      padding: 14px;
+      min-height: 0;
+    }
+
+    .panel {
+      min-height: 0;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: rgba(255, 255, 255, 0.94);
+      box-shadow: var(--shadow);
+      overflow: hidden;
+    }
+
+    .left-panel,
+    .right-panel {
+      display: flex;
+      flex-direction: column;
+    }
+
+    .panel-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 10px;
+      padding: 16px 16px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+
+    .panel-title {
+      margin: 0;
+      font-size: 15px;
+      font-weight: 800;
+      line-height: 1.2;
+    }
+
+    .panel-subtitle {
+      margin: 4px 0 0;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .scroll-body {
+      overflow: auto;
+      padding: 14px 16px 16px;
+    }
+
+    .field {
+      margin-bottom: 14px;
+    }
+
+    .field label {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      color: #2f3b4f;
+      font-size: 12px;
+      font-weight: 700;
+      margin-bottom: 7px;
+    }
+
+    .field input,
+    .field select {
+      width: 100%;
+      height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 0 11px;
+      color: var(--ink);
+      background: #fff;
+      outline: none;
+    }
+
+    .field input:focus,
+    .field select:focus {
+      border-color: var(--mint);
+      box-shadow: 0 0 0 3px rgba(18, 204, 185, 0.13);
+    }
+
+    .filter-grid {
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 8px;
+    }
+
+    .chip {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      align-items: center;
+      gap: 10px;
+      min-height: 35px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      background: #fff;
+      color: var(--ink);
+      padding: 7px 9px;
+      text-align: left;
+    }
+
+    .chip.active {
+      border-color: var(--mint);
+      background: rgba(18, 204, 185, 0.1);
+      box-shadow: inset 3px 0 0 var(--mint);
+      font-weight: 800;
+    }
+
+    .chip span:first-child {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .chip-count {
+      color: var(--muted);
+      font-size: 11px;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .switch-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 8px;
+    }
+
+    .switch {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 8px;
+      background: #fff;
+      color: #344054;
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    .switch input {
+      width: 16px;
+      height: 16px;
+      accent-color: var(--mint);
+    }
+
+    .bars {
+      display: grid;
+      gap: 9px;
+      margin-top: 4px;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 106px 1fr 44px;
+      align-items: center;
+      gap: 8px;
+      color: #344054;
+      font-size: 11px;
+    }
+
+    .bar-label {
+      min-width: 0;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .bar-track {
+      height: 7px;
+      border-radius: 99px;
+      background: #edf3f4;
+      overflow: hidden;
+    }
+
+    .bar-fill {
+      height: 100%;
+      width: 0;
+      border-radius: inherit;
+      background: linear-gradient(90deg, var(--mint), var(--blue));
+    }
+
+    .bar-value {
+      color: var(--muted);
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .graph-panel {
+      display: grid;
+      grid-template-rows: auto 1fr auto;
+      min-height: 0;
+      position: relative;
+    }
+
+    .graph-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      padding: 14px 16px 11px;
+      border-bottom: 1px solid var(--line);
+      background: #fff;
+      z-index: 2;
+    }
+
+    .graph-head h2 {
+      margin: 0;
+      font-size: 18px;
+      line-height: 1.2;
+    }
+
+    .graph-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      font-size: 13px;
+      flex-wrap: wrap;
+    }
+
+    .dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--mint);
+      display: inline-block;
+    }
+
+    .canvas-wrap {
+      position: relative;
+      min-height: 0;
+      background:
+        linear-gradient(rgba(18, 204, 185, 0.07) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(18, 204, 185, 0.07) 1px, transparent 1px),
+        #fff;
+      background-size: 44px 44px;
+    }
+
+    #kgCanvas {
+      display: block;
+      width: 100%;
+      height: 100%;
+    }
+
+    .canvas-empty {
+      position: absolute;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      color: var(--muted);
+      text-align: center;
+      padding: 24px;
+      pointer-events: none;
+    }
+
+    .graph-tooltip {
+      position: absolute;
+      z-index: 8;
+      display: none;
+      min-width: 180px;
+      max-width: 280px;
+      pointer-events: none;
+      padding: 10px 12px;
+      border: 1px solid rgba(18, 204, 185, 0.32);
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.96);
+      box-shadow: 0 16px 32px rgba(23, 32, 51, 0.15);
+      backdrop-filter: blur(10px);
+      color: var(--ink);
+    }
+
+    .graph-tooltip h5 {
+      margin: 0 0 5px;
+      font-size: 14px;
+      line-height: 1.2;
+    }
+
+    .graph-tooltip .meta {
+      color: var(--muted);
+      font-size: 11.5px;
+      margin-bottom: 6px;
+    }
+
+    .graph-tooltip .tags {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 4px;
+    }
+
+    .graph-tooltip .tag {
+      display: inline-flex;
+      align-items: center;
+      min-height: 20px;
+      padding: 2px 6px;
+      border-radius: 6px;
+      border: 1px solid rgba(18, 204, 185, 0.22);
+      background: rgba(18, 204, 185, 0.08);
+      color: #0b6f66;
+      font-size: 11px;
+    }
+
+    .graph-footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 10px;
+      padding: 10px 14px;
+      border-top: 1px solid var(--line);
+      background: #fff;
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .legend {
+      display: flex;
+      flex-wrap: wrap;
+      align-items: center;
+      gap: 9px;
+    }
+
+    .legend-item {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 26px;
+      padding: 4px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: #fff;
+      color: #344054;
+      font-weight: 700;
+      white-space: nowrap;
+    }
+
+    .legend-swatch {
+      width: 13px;
+      height: 13px;
+      border-radius: 50%;
+      display: inline-block;
+      box-shadow: 0 0 0 3px rgba(18, 204, 185, 0.08);
+    }
+
+    .right-panel .scroll-body {
+      padding: 0;
+      display: grid;
+      grid-template-rows: minmax(220px, 34vh) 1fr;
+      overflow: hidden;
+    }
+
+    .source-list {
+      border-bottom: 1px solid var(--line);
+      min-height: 0;
+      overflow: auto;
+      padding: 11px;
+      background: #fbfdfd;
+    }
+
+    .source-row {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      border: 1px solid transparent;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--ink);
+      padding: 11px;
+      margin-bottom: 6px;
+      text-align: left;
+    }
+
+    .source-row:hover,
+    .source-row.active {
+      border-color: rgba(18, 204, 185, 0.45);
+      background: #fff;
+    }
+
+    .source-row.active {
+      box-shadow: inset 3px 0 0 var(--mint);
+      background: #fff;
+    }
+
+    .source-name {
+      min-width: 0;
+      font-weight: 800;
+      font-size: 15px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
+    .source-tags {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-wrap: wrap;
+      gap: 5px;
+      margin-top: 2px;
+    }
+
+    .mini-tag {
+      display: inline-flex;
+      align-items: center;
+      max-width: 100%;
+      min-height: 20px;
+      padding: 2px 6px;
+      border: 1px solid rgba(18, 204, 185, 0.22);
+      border-radius: 6px;
+      color: #096d65;
+      background: rgba(18, 204, 185, 0.08);
+      font-size: 11.5px;
+      overflow-wrap: anywhere;
+    }
+
+    .source-score {
+      color: var(--mint-dark);
+      font-weight: 800;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .detail {
+      min-height: 0;
+      padding: 16px;
+      overflow: auto;
+    }
+
+    .detail h3 {
+      margin: 0 0 4px;
+      font-size: 20px;
+      overflow-wrap: anywhere;
+    }
+
+    .detail-caption {
+      color: var(--muted);
+      font-size: 12px;
+      margin-bottom: 14px;
+    }
+
+    .detail-block {
+      margin-top: 16px;
+    }
+
+    .detail-block h4 {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin: 0 0 9px;
+      font-size: 13px;
+      color: #253047;
+    }
+
+    .count-list {
+      display: grid;
+      gap: 7px;
+    }
+
+    .count-item {
+      display: grid;
+      grid-template-columns: 1fr auto;
+      gap: 8px;
+      align-items: center;
+      min-height: 28px;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 6px 8px;
+      background: #fff;
+      font-size: 12px;
+    }
+
+    .count-item span:first-child {
+      min-width: 0;
+      overflow-wrap: anywhere;
+    }
+
+    .count-item strong {
+      color: var(--muted);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .evidence-list {
+      display: grid;
+      gap: 9px;
+    }
+
+    .evidence {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      background: #fff;
+    }
+
+    .evidence-top {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 8px;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-size: 11px;
+      font-weight: 700;
+    }
+
+    .evidence p {
+      margin: 0;
+      color: #344054;
+      font-size: 12px;
+      line-height: 1.5;
+      overflow-wrap: anywhere;
+    }
+
+    .toast {
+      position: fixed;
+      left: 50%;
+      bottom: 24px;
+      transform: translateX(-50%);
+      display: none;
+      max-width: min(680px, calc(100vw - 48px));
+      border: 1px solid rgba(222, 91, 124, 0.25);
+      border-radius: 8px;
+      background: #fff;
+      color: #7f1d34;
+      padding: 12px 14px;
+      box-shadow: var(--shadow);
+      z-index: 20;
+      font-size: 13px;
+    }
+
+    .loading-line {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    @media (max-width: 1280px) {
+      .main-grid {
+        grid-template-columns: 286px minmax(460px, 1fr) 340px;
+      }
+
+      .status-strip {
+        grid-template-columns: repeat(3, minmax(112px, 1fr));
+      }
+
+      .stat-pill:nth-child(n + 4) {
+        display: none;
+      }
+    }
+
+    @media (max-width: 1060px) {
+      body {
+        overflow: auto;
+      }
+
+      .app-shell {
+        height: auto;
+        min-height: 100vh;
+      }
+
+      .topbar,
+      .main-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .topbar {
+        align-items: flex-start;
+        flex-direction: column;
+      }
+
+      .status-strip {
+        width: 100%;
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+
+      .main-grid {
+        min-height: auto;
+      }
+
+      .panel,
+      .graph-panel {
+        min-height: 560px;
+      }
+
+      .right-panel .detail {
+        max-height: none;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">
+        <div class="brand-mark" aria-hidden="true"></div>
+        <div>
+          <h1>天体源特性知识图谱</h1>
+          <p>Astro Agent Source Trait Atlas</p>
+        </div>
+      </div>
+
+      <section class="status-strip" id="summaryStats" aria-label="图谱统计">
+        <div class="stat-pill"><strong>...</strong><span>RAG 文献库</span></div>
+        <div class="stat-pill"><strong>...</strong><span>入图文献</span></div>
+        <div class="stat-pill"><strong>...</strong><span>天体源画像</span></div>
+        <div class="stat-pill"><strong>...</strong><span>源特性关系</span></div>
+        <div class="stat-pill"><strong>...</strong><span>证据切片</span></div>
+      </section>
+
+      <div class="top-actions">
+        <button class="ghost-btn" id="resetFilters" type="button" title="清空筛选">重置</button>
+        <button class="solid-btn" id="reloadData" type="button" title="重新读取图谱数据">刷新数据</button>
+      </div>
+    </header>
+
+    <main class="main-grid">
+      <aside class="panel left-panel">
+        <div class="panel-head">
+          <div>
+            <h2 class="panel-title">调研筛选</h2>
+            <p class="panel-subtitle" id="datasetLine">white_dwarf_kg / production_full</p>
+          </div>
+        </div>
+        <div class="scroll-body">
+          <div class="field">
+            <label for="sourceSearch">源名检索 <span id="profileCount">0</span></label>
+            <input id="sourceSearch" type="search" placeholder="WD 1145+017 / SDSS J..." autocomplete="off" />
+          </div>
+
+          <div class="field">
+            <label for="limitSelect">图谱规模</label>
+            <select id="limitSelect">
+              <option value="40" selected>40 个源</option>
+              <option value="50">50 个源</option>
+              <option value="80">80 个源</option>
+              <option value="120">120 个源</option>
+              <option value="200">200 个源</option>
+            </select>
+          </div>
+
+          <div class="field">
+            <label>关系层</label>
+            <div class="switch-grid">
+              <label class="switch"><input type="checkbox" data-relation="features" checked /> 源特征</label>
+              <label class="switch"><input type="checkbox" data-relation="methods" checked /> 测量方法</label>
+              <label class="switch"><input type="checkbox" data-relation="parameters" checked /> 物理参数</label>
+              <label class="switch"><input type="checkbox" data-relation="instruments" /> 仪器巡天</label>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>源特征分类</label>
+            <div class="filter-grid" id="featureFilters">
+              <button class="chip active" type="button"><span>全部特征</span><span class="chip-count">...</span></button>
+            </div>
+          </div>
+
+          <div class="field">
+            <label>特征覆盖度</label>
+            <div class="bars" id="featureBars"></div>
+          </div>
+        </div>
+      </aside>
+
+      <section class="panel graph-panel">
+        <div class="graph-head">
+          <div>
+            <h2 id="graphTitle">源 - 特征 - 方法 - 参数网络</h2>
+            <div class="graph-meta">
+              <span class="dot"></span>
+              <span id="graphStats">等待加载</span>
+            </div>
+          </div>
+          <div class="top-actions">
+            <button class="icon-btn" id="fitGraph" type="button" title="图谱居中">⌂</button>
+            <button class="icon-btn" id="freezeGraph" type="button" title="暂停或恢复布局">Ⅱ</button>
+          </div>
+        </div>
+      <div class="canvas-wrap" id="canvasWrap">
+        <canvas id="kgCanvas"></canvas>
+        <div class="graph-tooltip" id="graphTooltip"></div>
+        <div class="canvas-empty" id="canvasEmpty">当前筛选没有可展示的源画像</div>
+      </div>
+        <div class="graph-footer">
+          <div class="legend">
+            <span class="legend-item"><span class="legend-swatch" style="background:#213547"></span>天体源</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:rgb(18,204,185)"></span>源特征</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#5367dd"></span>测量方法</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#f2a93b"></span>物理参数</span>
+            <span class="legend-item"><span class="legend-swatch" style="background:#de5b7c"></span>仪器巡天</span>
+          </div>
+          <span id="graphMode">profile graph</span>
+        </div>
+      </section>
+
+      <aside class="panel right-panel">
+        <div class="panel-head">
+          <div>
+            <h2 class="panel-title">源画像与文献证据</h2>
+            <p class="panel-subtitle" id="activeFilterLine">全部特征</p>
+          </div>
+        </div>
+        <div class="scroll-body">
+          <div class="source-list" id="sourceList">
+            <div class="loading-line">正在读取源画像...</div>
+          </div>
+          <div class="detail" id="detailPanel">
+            <div class="loading-line">正在整理证据...</div>
+          </div>
+        </div>
+      </aside>
+    </main>
+  </div>
+
+  <div class="toast" id="toast"></div>
+
+  <script>
+    const DATASET = "white_dwarf_kg";
+    const TIMESTAMP = "production_full";
+    const GRAPH_FILE = "multi_stage_deduplicated.json";
+    const FEATURE_ORDER = [
+      "磁性白矮星",
+      "短周期白矮星双星",
+      "激变变星/CV",
+      "大质量/超大质量白矮星",
+      "极低质量白矮星/ELM",
+      "脉动白矮星",
+      "金属污染/行星残骸白矮星",
+      "食白矮星双星",
+      "X射线/高能白矮星系统",
+      "双简并/并合候选体"
+    ];
+
+    const state = {
+      summary: null,
+      profiles: [],
+      selectedSource: "",
+      feature: "",
+      source: "",
+      limit: 40,
+      relation: {
+        features: true,
+        methods: true,
+        parameters: true,
+        instruments: false
+      },
+      paused: false
+    };
+
+    const dom = {
+      summaryStats: document.getElementById("summaryStats"),
+      datasetLine: document.getElementById("datasetLine"),
+      profileCount: document.getElementById("profileCount"),
+      sourceSearch: document.getElementById("sourceSearch"),
+      limitSelect: document.getElementById("limitSelect"),
+      featureFilters: document.getElementById("featureFilters"),
+      featureBars: document.getElementById("featureBars"),
+      graphStats: document.getElementById("graphStats"),
+      graphTitle: document.getElementById("graphTitle"),
+      graphMode: document.getElementById("graphMode"),
+      sourceList: document.getElementById("sourceList"),
+      detailPanel: document.getElementById("detailPanel"),
+      activeFilterLine: document.getElementById("activeFilterLine"),
+      toast: document.getElementById("toast"),
+      canvasWrap: document.getElementById("canvasWrap"),
+      canvas: document.getElementById("kgCanvas"),
+      canvasEmpty: document.getElementById("canvasEmpty"),
+      reloadData: document.getElementById("reloadData"),
+      graphTooltip: document.getElementById("graphTooltip")
+    };
+
+    const fmt = new Intl.NumberFormat("zh-CN");
+    const collator = new Intl.Collator("zh-CN");
+
+    function apiUrl(path, params = {}) {
+      const url = new URL(path, window.location.origin);
+      Object.entries(params).forEach(([key, value]) => {
+        if (value !== undefined && value !== null && value !== "") {
+          url.searchParams.set(key, value);
+        }
+      });
+      return url.toString();
+    }
+
+    async function fetchJson(path, params) {
+      const response = await fetch(apiUrl(path, params), { cache: "no-store" });
+      if (!response.ok) {
+        const message = await response.text();
+        throw new Error(`${response.status} ${response.statusText}: ${message.slice(0, 220)}`);
+      }
+      return response.json();
+    }
+
+    function escapeHtml(value) {
+      return String(value ?? "")
+        .replace(/&/g, "&amp;")
+        .replace(/</g, "&lt;")
+        .replace(/>/g, "&gt;")
+        .replace(/"/g, "&quot;")
+        .replace(/'/g, "&#39;");
+    }
+
+    function truncate(value, size = 180) {
+      const text = String(value ?? "").replace(/\s+/g, " ").trim();
+      return text.length > size ? `${text.slice(0, size - 1)}…` : text;
+    }
+
+    function entries(obj, limit = 8) {
+      return Object.entries(obj || {})
+        .sort((a, b) => (b[1] || 0) - (a[1] || 0) || collator.compare(a[0], b[0]))
+        .slice(0, limit);
+    }
+
+    function total(obj) {
+      return Object.values(obj || {}).reduce((sum, value) => sum + Number(value || 0), 0);
+    }
+
+    function showToast(message) {
+      dom.toast.textContent = message;
+      dom.toast.style.display = "block";
+      window.clearTimeout(showToast.timer);
+      showToast.timer = window.setTimeout(() => {
+        dom.toast.style.display = "none";
+      }, 6500);
+    }
+
+    async function loadSummary() {
+      const summary = await fetchJson(`/api/kg-summary/${DATASET}`, {
+        timestamp: TIMESTAMP,
+        filename: GRAPH_FILE
+      });
+      state.summary = summary;
+      renderSummary();
+      renderFeatureFilters();
+      renderFeatureBars();
+    }
+
+    async function loadProfiles() {
+      dom.sourceList.innerHTML = `<div class="loading-line">正在读取源画像...</div>`;
+      dom.detailPanel.innerHTML = `<div class="loading-line">正在整理证据...</div>`;
+      const data = await fetchJson(`/api/source-profiles/${DATASET}`, {
+        timestamp: TIMESTAMP,
+        filename: GRAPH_FILE,
+        feature: state.feature,
+        source: state.source,
+        limit: state.limit
+      });
+      state.profiles = data.profiles || [];
+      dom.profileCount.textContent = fmt.format(data.count || state.profiles.length);
+
+      if (!state.profiles.some((item) => item.source === state.selectedSource)) {
+        state.selectedSource = state.profiles[0]?.source || "";
+      }
+
+      renderProfiles();
+      renderDetail();
+      rebuildGraph();
+    }
+
+    function renderSummary() {
+      const summary = state.summary || {};
+      dom.datasetLine.textContent = `${DATASET} / ${TIMESTAMP}`;
+      dom.summaryStats.innerHTML = [
+        ["RAG 文献库", summary.papers_total],
+        ["入图文献", summary.papers_in_graph],
+        ["天体源画像", summary.source_profiles],
+        ["源特性关系", summary.relationships],
+        ["证据切片", summary.chunks_used]
+      ].map(([label, value]) => `
+        <div class="stat-pill">
+          <strong>${fmt.format(value || 0)}</strong>
+          <span>${label}</span>
+        </div>
+      `).join("");
+    }
+
+    function featureItems() {
+      const counts = state.summary?.feature_counts || {};
+      const known = FEATURE_ORDER.filter((name) => name in counts);
+      const rest = Object.keys(counts).filter((name) => !known.includes(name)).sort(collator.compare);
+      return [...known, ...rest].map((name) => [name, counts[name] || 0]);
+    }
+
+    function renderFeatureFilters() {
+      const allCount = total(state.summary?.feature_counts);
+      const buttons = [[``, "全部特征", allCount], ...featureItems().map(([name, count]) => [name, name, count])];
+      dom.featureFilters.innerHTML = buttons.map(([value, label, count]) => `
+        <button class="chip ${state.feature === value ? "active" : ""}" type="button" data-feature="${escapeHtml(value)}">
+          <span>${escapeHtml(label)}</span>
+          <span class="chip-count">${fmt.format(count || 0)}</span>
+        </button>
+      `).join("");
+    }
+
+    function renderFeatureBars() {
+      const items = featureItems().slice(0, 10);
+      const max = Math.max(1, ...items.map(([, count]) => count));
+      dom.featureBars.innerHTML = items.map(([name, count]) => `
+        <div class="bar-row" title="${escapeHtml(name)}">
+          <span class="bar-label">${escapeHtml(name)}</span>
+          <span class="bar-track"><span class="bar-fill" style="width:${Math.max(4, count / max * 100)}%"></span></span>
+          <span class="bar-value">${fmt.format(count)}</span>
+        </div>
+      `).join("");
+    }
+
+    function renderProfiles() {
+      if (!state.profiles.length) {
+        dom.sourceList.innerHTML = `<div class="loading-line">没有匹配的源画像</div>`;
+        return;
+      }
+      dom.sourceList.innerHTML = state.profiles.map((profile) => {
+        const tags = entries(profile.features, 3)
+          .map(([name, count]) => `<span class="mini-tag">${escapeHtml(name)} · ${fmt.format(count)}</span>`)
+          .join("");
+        return `
+          <button class="source-row ${profile.source === state.selectedSource ? "active" : ""}" type="button" data-source="${escapeHtml(profile.source)}">
+            <span class="source-name">${escapeHtml(profile.source)}</span>
+            <span class="source-score">${fmt.format(profile.feature_score || 0)}</span>
+            <span class="source-tags">${tags}</span>
+          </button>
+        `;
+      }).join("");
+    }
+
+    function renderCountList(title, data, color, limit = 7) {
+      const list = entries(data, limit);
+      if (!list.length) return "";
+      return `
+        <div class="detail-block">
+          <h4><span>${escapeHtml(title)}</span><span style="color:${color}">${fmt.format(total(data))}</span></h4>
+          <div class="count-list">
+            ${list.map(([name, count]) => `
+              <div class="count-item">
+                <span>${escapeHtml(name)}</span>
+                <strong>${fmt.format(count)}</strong>
+              </div>
+            `).join("")}
+          </div>
+        </div>
+      `;
+    }
+
+    function renderDetail() {
+      const profile = state.profiles.find((item) => item.source === state.selectedSource);
+      dom.activeFilterLine.textContent = state.feature || "全部特征";
+
+      if (!profile) {
+        dom.detailPanel.innerHTML = `<div class="loading-line">没有选中的源画像</div>`;
+        return;
+      }
+
+      const papers = profile.papers || {};
+      const evidence = (profile.evidence || []).slice(0, 5);
+      const evidenceHtml = evidence.length ? `
+        <div class="detail-block">
+          <h4><span>文献证据</span><span>${fmt.format(evidence.length)}</span></h4>
+          <div class="evidence-list">
+            ${evidence.map((item) => `
+              <article class="evidence">
+                <div class="evidence-top">
+                  <span>${escapeHtml(item.bibcode || "unknown")}</span>
+                  <span>${escapeHtml(item.year || item.section || "")}</span>
+                </div>
+                <p>${escapeHtml(truncate(item.text, 360))}</p>
+              </article>
+            `).join("")}
+          </div>
+        </div>
+      ` : "";
+
+      dom.detailPanel.innerHTML = `
+        <h3>${escapeHtml(profile.source)}</h3>
+        <div class="detail-caption">
+          特征命中 ${fmt.format(profile.feature_score || 0)} · 文献 ${fmt.format(Object.keys(papers).length)}
+        </div>
+        ${renderCountList("源特征", profile.features, "rgb(18,204,185)", 9)}
+        ${renderCountList("测量方法", profile.methods, "#5367dd", 8)}
+        ${renderCountList("关键参数", profile.parameters, "#f2a93b", 8)}
+        ${renderCountList("仪器与巡天", profile.instruments, "#de5b7c", 7)}
+        ${renderCountList("关联文献", papers, "#855bd7", 8)}
+        ${evidenceHtml}
+      `;
+      renderProfiles();
+    }
+
+    function relationColor(type) {
+      return {
+        source: "#213547",
+        feature: "rgb(18,204,185)",
+        method: "#5367dd",
+        parameter: "#f2a93b",
+        instrument: "#de5b7c"
+      }[type] || "#98a2b3";
+    }
+
+    function relationLabel(type) {
+      return {
+        feature: "具有特征",
+        method: "用方法测量",
+        parameter: "测得参数",
+        instrument: "观测来源"
+      }[type] || "关联";
+    }
+
+    function addNode(map, id, name, type, weight, profile) {
+      const node = map.get(id);
+      if (node) {
+        node.weight += weight;
+        return node;
+      }
+      const created = {
+        id,
+        name,
+        type,
+        weight,
+        profile,
+        radius: 8,
+        x: 0,
+        y: 0,
+        vx: 0,
+        vy: 0,
+        fixed: false
+      };
+      map.set(id, created);
+      return created;
+    }
+
+    function graphFromProfiles() {
+      const nodes = new Map();
+      const links = [];
+      const selectedId = state.selectedSource ? `source:${state.selectedSource}` : "";
+
+      state.profiles.forEach((profile) => {
+        const source = addNode(nodes, `source:${profile.source}`, profile.source, "source", Math.max(1, profile.feature_score || 1), profile);
+        source.selected = source.id === selectedId;
+
+        const addRelations = (bucket, type, perSourceLimit) => {
+          if (!state.relation[bucket]) return;
+          entries(profile[bucket], perSourceLimit).forEach(([name, count]) => {
+            if (type === "feature" && state.feature && name !== state.feature) return;
+            const target = addNode(nodes, `${type}:${name}`, name, type, Number(count || 1), null);
+            links.push({
+              source: source.id,
+              target: target.id,
+              type,
+              relation: relationLabel(type),
+              weight: Number(count || 1)
+            });
+          });
+        };
+
+        addRelations("features", "feature", state.feature ? 6 : 3);
+        addRelations("methods", "method", 2);
+        addRelations("parameters", "parameter", 2);
+        addRelations("instruments", "instrument", 1);
+      });
+
+      let nodeList = [...nodes.values()];
+      if (nodeList.length > 360) {
+        const keep = new Set(
+          nodeList
+            .filter((node) => node.type === "source" || node.type === "feature" || node.selected)
+            .map((node) => node.id)
+        );
+        nodeList
+          .filter((node) => !keep.has(node.id))
+          .sort((a, b) => b.weight - a.weight)
+          .slice(0, Math.max(0, 360 - keep.size))
+          .forEach((node) => keep.add(node.id));
+        nodeList = nodeList.filter((node) => keep.has(node.id));
+      }
+
+      const keepIds = new Set(nodeList.map((node) => node.id));
+      const linkList = links.filter((link) => keepIds.has(link.source) && keepIds.has(link.target));
+      const maxWeight = Math.max(1, ...nodeList.map((node) => node.weight));
+      const sizeByType = {
+        source: { base: 12, bonus: 20, max: 32 },
+        feature: { base: 15, bonus: 20, max: 35 },
+        method: { base: 13, bonus: 17, max: 29 },
+        parameter: { base: 13, bonus: 17, max: 29 },
+        instrument: { base: 12, bonus: 16, max: 27 }
+      };
+      nodeList.forEach((node) => {
+        const profile = sizeByType[node.type] || sizeByType.source;
+        const bonus = Math.sqrt(node.weight / maxWeight) * profile.bonus;
+        node.radius = Math.min(profile.max, profile.base + bonus);
+        node.importance = node.weight / maxWeight;
+      });
+      return { nodes: nodeList, links: linkList };
+    }
+
+    const graph = {
+      data: { nodes: [], links: [] },
+      ctx: dom.canvas.getContext("2d"),
+      width: 0,
+      height: 0,
+      dpr: 1,
+      alpha: 0,
+      raf: 0,
+      scale: 1,
+      offsetX: 0,
+      offsetY: 0,
+      hover: null,
+      dragNode: null,
+      pan: null
+    };
+
+    function hashText(text) {
+      let hash = 2166136261;
+      for (let i = 0; i < text.length; i += 1) {
+        hash ^= text.charCodeAt(i);
+        hash += (hash << 1) + (hash << 4) + (hash << 7) + (hash << 8) + (hash << 24);
+      }
+      return Math.abs(hash >>> 0);
+    }
+
+    function resizeCanvas() {
+      const rect = dom.canvasWrap.getBoundingClientRect();
+      graph.dpr = Math.max(1, Math.min(window.devicePixelRatio || 1, 2));
+      graph.width = Math.max(320, rect.width);
+      graph.height = Math.max(320, rect.height);
+      dom.canvas.width = Math.floor(graph.width * graph.dpr);
+      dom.canvas.height = Math.floor(graph.height * graph.dpr);
+      dom.canvas.style.width = `${graph.width}px`;
+      dom.canvas.style.height = `${graph.height}px`;
+      graph.ctx.setTransform(graph.dpr, 0, 0, graph.dpr, 0, 0);
+      renderCanvas();
+    }
+
+    function worldPoint(event) {
+      const rect = dom.canvas.getBoundingClientRect();
+      return {
+        x: (event.clientX - rect.left - graph.offsetX) / graph.scale,
+        y: (event.clientY - rect.top - graph.offsetY) / graph.scale
+      };
+    }
+
+    function resetView() {
+      graph.scale = 1;
+      graph.offsetX = 0;
+      graph.offsetY = 0;
+      renderCanvas();
+    }
+
+    function initLayout(data) {
+      const anchors = {
+        source: [graph.width * 0.46, graph.height * 0.52],
+        feature: [graph.width * 0.28, graph.height * 0.24],
+        method: [graph.width * 0.80, graph.height * 0.34],
+        parameter: [graph.width * 0.72, graph.height * 0.78],
+        instrument: [graph.width * 0.20, graph.height * 0.78]
+      };
+
+      data.nodes.forEach((node, index) => {
+        const seed = hashText(node.id);
+        const anchor = anchors[node.type] || [graph.width / 2, graph.height / 2];
+        const angle = (seed % 628) / 100;
+        const spread = node.type === "source" ? 230 : 145;
+        node.x = anchor[0] + Math.cos(angle) * ((seed % spread) + index % 19);
+        node.y = anchor[1] + Math.sin(angle) * ((seed % spread) + index % 17);
+        node.vx = 0;
+        node.vy = 0;
+        node.fixed = false;
+      });
+
+      graph.data = data;
+      graph.alpha = 1;
+      dom.canvasEmpty.style.display = data.nodes.length ? "none" : "flex";
+      window.cancelAnimationFrame(graph.raf);
+      tick();
+    }
+
+    function tick() {
+      if (!state.paused && graph.alpha > 0.018) {
+        simulate();
+        graph.alpha *= 0.965;
+      }
+      renderCanvas();
+      if (!state.paused && graph.alpha > 0.018) {
+        graph.raf = window.requestAnimationFrame(tick);
+      }
+    }
+
+    function simulate() {
+      const nodes = graph.data.nodes;
+      const links = graph.data.links;
+      const byId = new Map(nodes.map((node) => [node.id, node]));
+      const alpha = graph.alpha;
+
+      links.forEach((link) => {
+        const source = byId.get(link.source);
+        const target = byId.get(link.target);
+        if (!source || !target) return;
+        const dx = target.x - source.x;
+        const dy = target.y - source.y;
+        const distance = Math.max(1, Math.sqrt(dx * dx + dy * dy));
+        const ideal = link.type === "feature" ? 148 : link.type === "method" ? 196 : link.type === "parameter" ? 206 : 180;
+        const force = (distance - ideal) / distance * 0.021 * alpha;
+        const fx = dx * force;
+        const fy = dy * force;
+        if (!source.fixed) {
+          source.vx += fx;
+          source.vy += fy;
+        }
+        if (!target.fixed) {
+          target.vx -= fx;
+          target.vy -= fy;
+        }
+      });
+
+      for (let i = 0; i < nodes.length; i += 1) {
+        for (let j = i + 1; j < nodes.length; j += 1) {
+          const a = nodes[i];
+          const b = nodes[j];
+          let dx = b.x - a.x;
+          let dy = b.y - a.y;
+          let dist2 = dx * dx + dy * dy;
+          if (dist2 < 0.01) {
+            dx = 1;
+            dy = 0;
+            dist2 = 1;
+          }
+          const min = (a.radius + b.radius + 18);
+          if (dist2 < min * min * 14) {
+            const distance = Math.sqrt(dist2);
+            const push = (min * min / Math.max(dist2, 20)) * 0.14 * alpha;
+            const fx = dx / distance * push;
+            const fy = dy / distance * push;
+            if (!a.fixed) {
+              a.vx -= fx;
+              a.vy -= fy;
+            }
+            if (!b.fixed) {
+              b.vx += fx;
+              b.vy += fy;
+            }
+          }
+        }
+      }
+
+      const anchors = {
+        source: [graph.width * 0.46, graph.height * 0.52],
+        feature: [graph.width * 0.28, graph.height * 0.24],
+        method: [graph.width * 0.80, graph.height * 0.34],
+        parameter: [graph.width * 0.72, graph.height * 0.78],
+        instrument: [graph.width * 0.20, graph.height * 0.78]
+      };
+
+      nodes.forEach((node) => {
+        if (node.fixed) return;
+        const anchor = anchors[node.type] || [graph.width / 2, graph.height / 2];
+        const anchorForce = node.type === "source" ? 0.0025 : 0.010;
+        node.vx += (anchor[0] - node.x) * anchorForce * alpha;
+        node.vy += (anchor[1] - node.y) * anchorForce * alpha;
+        node.vx *= 0.82;
+        node.vy *= 0.82;
+        node.x += node.vx;
+        node.y += node.vy;
+        node.x = Math.max(20, Math.min(graph.width - 20, node.x));
+        node.y = Math.max(20, Math.min(graph.height - 20, node.y));
+      });
+    }
+
+    function shouldLabel(node) {
+      if (graph.hover?.id === node.id) return true;
+      if (node.id === `source:${state.selectedSource}`) return true;
+      if (node.type === "feature") return node.weight >= 300 || node.radius >= 38;
+      if (node.type === "source") return node.weight >= 650 || node.radius >= 36;
+      return node.weight >= 260 && node.radius >= 29;
+    }
+
+    function drawPolygon(ctx, x, y, radius, sides, rotation = 0) {
+      ctx.beginPath();
+      for (let i = 0; i < sides; i += 1) {
+        const angle = rotation + i * Math.PI * 2 / sides;
+        const px = x + Math.cos(angle) * radius;
+        const py = y + Math.sin(angle) * radius;
+        if (i === 0) ctx.moveTo(px, py);
+        else ctx.lineTo(px, py);
+      }
+      ctx.closePath();
+    }
+
+    function drawNodeBody(ctx, node, selected) {
+      const r = node.radius;
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(node.x, node.y, r + (selected ? 7 : 4), 0, Math.PI * 2);
+      ctx.fillStyle = selected ? "rgba(18, 204, 185, 0.20)" : "rgba(255,255,255,0.88)";
+      ctx.fill();
+
+      ctx.shadowColor = selected ? "rgba(18, 204, 185, 0.38)" : "rgba(23, 32, 51, 0.16)";
+      ctx.shadowBlur = selected ? 18 : 8;
+      ctx.shadowOffsetY = selected ? 2 : 1;
+      ctx.fillStyle = relationColor(node.type);
+      ctx.strokeStyle = selected ? "#172033" : "rgba(23,32,51,0.18)";
+      ctx.lineWidth = selected ? 3 : 1.2;
+
+      if (node.type === "feature") {
+        drawPolygon(ctx, node.x, node.y, r, 6, Math.PI / 6);
+      } else if (node.type === "method") {
+        roundRect(ctx, node.x - r, node.y - r, r * 2, r * 2, 7);
+      } else if (node.type === "parameter") {
+        drawPolygon(ctx, node.x, node.y, r, 4, Math.PI / 4);
+      } else if (node.type === "instrument") {
+        drawPolygon(ctx, node.x, node.y + 1, r, 3, -Math.PI / 2);
+      } else {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, r, 0, Math.PI * 2);
+      }
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+
+      drawNodeGlyph(ctx, node);
+    }
+
+    function drawNodeGlyph(ctx, node) {
+      ctx.save();
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+      ctx.fillStyle = "#fff";
+      if (node.type === "source") {
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, Math.max(4, node.radius * 0.28), 0, Math.PI * 2);
+        ctx.fill();
+        ctx.beginPath();
+        ctx.arc(node.x, node.y, Math.max(7, node.radius * 0.52), 0, Math.PI * 2);
+        ctx.strokeStyle = "rgba(255,255,255,0.65)";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      } else {
+        const glyph = {
+          feature: "★",
+          method: "∿",
+          parameter: "σ",
+          instrument: "◉"
+        }[node.type] || "•";
+        const fontSize = Math.max(12, Math.min(21, node.radius * 0.76));
+        ctx.font = `800 ${fontSize}px Microsoft YaHei, Segoe UI, sans-serif`;
+        ctx.fillText(glyph, node.x, node.y + 1);
+      }
+      ctx.restore();
+    }
+
+    function renderTooltip(node, x, y) {
+      if (!node) {
+        dom.graphTooltip.style.display = "none";
+        return;
+      }
+      const metaParts = [node.type];
+      if (node.weight) metaParts.push(`权重 ${fmt.format(node.weight)}`);
+      const tags = [];
+      if (node.profile?.features) {
+        entries(node.profile.features, 3).forEach(([name, count]) => {
+          tags.push(`<span class="tag">${escapeHtml(name)} · ${fmt.format(count)}</span>`);
+        });
+      }
+      if (node.profile?.methods && node.type === "source") {
+        entries(node.profile.methods, 2).forEach(([name, count]) => {
+          tags.push(`<span class="tag">${escapeHtml(name)} · ${fmt.format(count)}</span>`);
+        });
+      }
+      dom.graphTooltip.innerHTML = `
+        <h5>${escapeHtml(node.name)}</h5>
+        <div class="meta">${escapeHtml(metaParts.join(' · '))}</div>
+        <div class="tags">${tags.slice(0, 5).join("")}</div>
+      `;
+      dom.graphTooltip.style.display = "block";
+      const tipWidth = dom.graphTooltip.offsetWidth || 220;
+      const tipHeight = dom.graphTooltip.offsetHeight || 100;
+      const left = Math.min(graph.width - tipWidth - 16, Math.max(16, x + 18));
+      const top = Math.min(graph.height - tipHeight - 16, Math.max(16, y + 18));
+      dom.graphTooltip.style.left = `${left}px`;
+      dom.graphTooltip.style.top = `${top}px`;
+    }
+
+    function renderCanvas() {
+      const ctx = graph.ctx;
+      ctx.save();
+      ctx.setTransform(graph.dpr, 0, 0, graph.dpr, 0, 0);
+      ctx.clearRect(0, 0, graph.width, graph.height);
+      ctx.translate(graph.offsetX, graph.offsetY);
+      ctx.scale(graph.scale, graph.scale);
+
+      const byId = new Map(graph.data.nodes.map((node) => [node.id, node]));
+      const selectedId = state.selectedSource ? `source:${state.selectedSource}` : "";
+      const focusId = graph.hover?.id || selectedId;
+      graph.data.links.forEach((link) => {
+        const source = byId.get(link.source);
+        const target = byId.get(link.target);
+        if (!source || !target) return;
+        const focused = focusId && (source.id === focusId || target.id === focusId);
+        ctx.beginPath();
+        ctx.moveTo(source.x, source.y);
+        ctx.lineTo(target.x, target.y);
+        ctx.strokeStyle = relationColor(link.type);
+        ctx.globalAlpha = focusId ? (focused ? 0.54 : 0.055) : 0.16;
+        ctx.lineWidth = Math.max(focused ? 1.6 : 0.8, Math.min(focused ? 5 : 2.6, Math.sqrt(link.weight || 1) * (focused ? 0.42 : 0.22)));
+        ctx.stroke();
+      });
+      ctx.globalAlpha = 1;
+
+      graph.data.nodes.forEach((node) => {
+        const selected = node.id === `source:${state.selectedSource}` || graph.hover?.id === node.id;
+        drawNodeBody(ctx, node, selected);
+      });
+
+      ctx.textAlign = "center";
+      ctx.textBaseline = "top";
+      graph.data.nodes.forEach((node) => {
+        if (!shouldLabel(node)) return;
+        const text = truncate(node.name, node.type === "source" ? 24 : 19);
+        const y = node.y + node.radius + 8;
+        const fontSize = node.type === "source" ? 13.5 : 12.5;
+        ctx.font = `700 ${fontSize}px Microsoft YaHei, Segoe UI, sans-serif`;
+        const metrics = ctx.measureText(text);
+        const width = Math.min(metrics.width + 15, 196);
+        const height = node.type === "source" ? 24 : 22;
+        ctx.fillStyle = "rgba(255,255,255,0.92)";
+        ctx.strokeStyle = node.type === "source" ? "rgba(18,204,185,0.42)" : "rgba(230,237,240,0.95)";
+        roundRect(ctx, node.x - width / 2, y - 2, width, height, 7);
+        ctx.fill();
+        ctx.stroke();
+        ctx.fillStyle = node.type === "source" ? "#213547" : "#344054";
+        ctx.fillText(text, node.x, y + 3, width - 10);
+      });
+
+      ctx.restore();
+
+      if (graph.hover) {
+        renderTooltip(graph.hover, graph.hover.x * graph.scale + graph.offsetX, graph.hover.y * graph.scale + graph.offsetY);
+      } else {
+        renderTooltip(null);
+      }
+    }
+
+    function roundRect(ctx, x, y, width, height, radius) {
+      const r = Math.min(radius, width / 2, height / 2);
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + width - r, y);
+      ctx.quadraticCurveTo(x + width, y, x + width, y + r);
+      ctx.lineTo(x + width, y + height - r);
+      ctx.quadraticCurveTo(x + width, y + height, x + width - r, y + height);
+      ctx.lineTo(x + r, y + height);
+      ctx.quadraticCurveTo(x, y + height, x, y + height - r);
+      ctx.lineTo(x, y + r);
+      ctx.quadraticCurveTo(x, y, x + r, y);
+      ctx.closePath();
+    }
+
+    function findNodeAt(point) {
+      for (let i = graph.data.nodes.length - 1; i >= 0; i -= 1) {
+        const node = graph.data.nodes[i];
+        const dx = point.x - node.x;
+        const dy = point.y - node.y;
+        if (dx * dx + dy * dy <= (node.radius + 12) * (node.radius + 12)) return node;
+      }
+      return null;
+    }
+
+    function rebuildGraph() {
+      const data = graphFromProfiles();
+      const featurePart = state.feature ? ` / ${state.feature}` : "";
+      dom.graphTitle.textContent = `源 - 特征 - 方法 - 参数网络${featurePart}`;
+      dom.graphStats.textContent = `${fmt.format(data.nodes.length)} 节点 · ${fmt.format(data.links.length)} 关系`;
+      dom.graphMode.textContent = state.paused ? "layout paused" : "profile graph";
+      initLayout(data);
+    }
+
+    function selectSource(sourceName) {
+      state.selectedSource = sourceName;
+      renderDetail();
+      graph.alpha = 0.18;
+      if (state.paused) renderCanvas();
+      else tick();
+    }
+
+    function bindEvents() {
+      dom.reloadData.addEventListener("click", async () => {
+        try {
+          await Promise.all([loadSummary(), loadProfiles()]);
+        } catch (error) {
+          showToast(error.message);
+        }
+      });
+
+      document.getElementById("resetFilters").addEventListener("click", async () => {
+        state.feature = "";
+        state.source = "";
+        state.limit = 40;
+        dom.sourceSearch.value = "";
+        dom.limitSelect.value = "40";
+        renderFeatureFilters();
+        await loadProfiles().catch((error) => showToast(error.message));
+      });
+
+      document.getElementById("fitGraph").addEventListener("click", resetView);
+
+      document.getElementById("freezeGraph").addEventListener("click", () => {
+        state.paused = !state.paused;
+        document.getElementById("freezeGraph").textContent = state.paused ? "▶" : "Ⅱ";
+        dom.graphMode.textContent = state.paused ? "layout paused" : "profile graph";
+        if (!state.paused) {
+          graph.alpha = Math.max(graph.alpha, 0.35);
+          tick();
+        }
+      });
+
+      dom.limitSelect.addEventListener("change", async (event) => {
+        state.limit = Number(event.target.value || 40);
+        await loadProfiles().catch((error) => showToast(error.message));
+      });
+
+      const search = debounce(async (value) => {
+        state.source = value.trim();
+        await loadProfiles().catch((error) => showToast(error.message));
+      }, 320);
+      dom.sourceSearch.addEventListener("input", (event) => search(event.target.value));
+
+      dom.featureFilters.addEventListener("click", async (event) => {
+        const button = event.target.closest("[data-feature]");
+        if (!button) return;
+        state.feature = button.dataset.feature || "";
+        renderFeatureFilters();
+        await loadProfiles().catch((error) => showToast(error.message));
+      });
+
+      document.querySelectorAll("[data-relation]").forEach((checkbox) => {
+        checkbox.addEventListener("change", (event) => {
+          state.relation[event.target.dataset.relation] = event.target.checked;
+          rebuildGraph();
+        });
+      });
+
+      dom.sourceList.addEventListener("click", (event) => {
+        const button = event.target.closest("[data-source]");
+        if (button) selectSource(button.dataset.source);
+      });
+
+      dom.canvas.addEventListener("mousemove", (event) => {
+        const point = worldPoint(event);
+        if (graph.dragNode) {
+          graph.dragNode.x = point.x;
+          graph.dragNode.y = point.y;
+          graph.dragNode.vx = 0;
+          graph.dragNode.vy = 0;
+          renderCanvas();
+          return;
+        }
+        if (graph.pan) {
+          graph.offsetX = event.clientX - graph.pan.x;
+          graph.offsetY = event.clientY - graph.pan.y;
+          renderCanvas();
+          return;
+        }
+        const node = findNodeAt(point);
+        if (node?.id !== graph.hover?.id) {
+          graph.hover = node;
+          dom.canvas.style.cursor = node ? "pointer" : "grab";
+          renderTooltip(node, event.offsetX, event.offsetY);
+          renderCanvas();
+        }
+      });
+
+      dom.canvas.addEventListener("mouseleave", () => {
+        graph.hover = null;
+        graph.dragNode = null;
+        graph.pan = null;
+        renderTooltip(null);
+        renderCanvas();
+      });
+
+      dom.canvas.addEventListener("mousedown", (event) => {
+        const point = worldPoint(event);
+        const node = findNodeAt(point);
+        if (node) {
+          graph.dragNode = node;
+          node.fixed = true;
+          graph.hover = node;
+          if (node.type === "source") selectSource(node.name);
+          if (node.type === "feature" && (state.summary?.feature_counts || {})[node.name]) {
+            state.feature = node.name;
+            renderFeatureFilters();
+            loadProfiles().catch((error) => showToast(error.message));
+          }
+        } else {
+          graph.pan = {
+            x: event.clientX - graph.offsetX,
+            y: event.clientY - graph.offsetY
+          };
+        }
+      });
+
+      window.addEventListener("mouseup", () => {
+        graph.dragNode = null;
+        graph.pan = null;
+      });
+
+      dom.canvas.addEventListener("wheel", (event) => {
+        event.preventDefault();
+        const rect = dom.canvas.getBoundingClientRect();
+        const px = event.clientX - rect.left;
+        const py = event.clientY - rect.top;
+        const before = {
+          x: (px - graph.offsetX) / graph.scale,
+          y: (py - graph.offsetY) / graph.scale
+        };
+        const delta = event.deltaY > 0 ? 0.9 : 1.1;
+        graph.scale = Math.max(0.35, Math.min(2.6, graph.scale * delta));
+        graph.offsetX = px - before.x * graph.scale;
+        graph.offsetY = py - before.y * graph.scale;
+        renderCanvas();
+      }, { passive: false });
+
+      new ResizeObserver(() => {
+        resizeCanvas();
+        rebuildGraph();
+      }).observe(dom.canvasWrap);
+    }
+
+    function debounce(fn, delay) {
+      let timer = 0;
+      return (...args) => {
+        window.clearTimeout(timer);
+        timer = window.setTimeout(() => fn(...args), delay);
+      };
+    }
+
+    async function init() {
+      bindEvents();
+      resizeCanvas();
+      try {
+        await loadSummary();
+        await loadProfiles();
+      } catch (error) {
+        showToast(error.message);
+        dom.sourceList.innerHTML = `<div class="loading-line">数据读取失败</div>`;
+        dom.detailPanel.innerHTML = `<div class="loading-line">${escapeHtml(error.message)}</div>`;
+      }
+    }
+
+    init();
+  </script>
+</body>
+</html>

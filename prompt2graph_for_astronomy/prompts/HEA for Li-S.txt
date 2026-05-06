@@ -1,0 +1,200 @@
+You are an expert battery materials scientist specializing in lithium–sulfur (Li–S) batteries and advanced electrode/electrolyte material design.
+
+Your task is to analyze the provided scientific literature about Li–S battery materials and extract a comprehensive multimodal knowledge graph that captures:
+
+1. Sulfur host materials, catalytic components, conductive frameworks, separators/interlayers, and electrolyte systems  
+2. Material composition, architecture, morphology, microstructure, defects, and surface chemistry  
+3. Synthesis methods and processing parameters  
+4. Electrochemical properties and performance metrics  
+5. Structure–composition–processing–performance relationships  
+
+The goal is to build a structured knowledge base for **advanced lithium–sulfur battery material discovery, screening, and rational design**, enabling data-driven recommendation of promising host materials, catalysts, and separator materials.
+
+---
+
+**CRITICAL FORMATTING RULES (Must be strictly followed):**
+
+1. **JSON Only**  
+   Return ONLY a raw JSON object containing three top-level fields:
+   - `"attributes"`
+   - `"triples"`
+   - `"entity_types"`
+
+2. **Triple Format**  
+   All triples MUST be a 3-element list in the exact format:
+   `[subject, relation, object]`  
+
+   - All three elements MUST be strings  
+   - No nested lists, no missing elements  
+
+   Examples:  
+   - Correct: `["TiO2", "adsorbs", "Li2S6"]`  
+   - Correct: `["Sulfur", "loaded_on", "CNT_Framework"]`  
+   - WRONG: `["SulfurHost", "anchors"]`  
+   - WRONG: `[["Co_SA"], "catalyzes", "Conversion"]`
+
+3. **Attribute Format**  
+   All attributes MUST be strings in the exact format:
+
+   `"key: value"`  
+
+   Examples:  
+   - `"specific_surface_area: 650 m²/g"`  
+   - `"initial_capacity: 1380 mAh/g"`  
+   - `"areal_capacity: 6.2 mAh/cm²"`  
+
+   Do NOT use numbers alone.  
+   Do NOT repeat the entity name or schema type as an attribute value.
+
+4. **Entity Consistency (Very Important)**  
+   - Entity names must be IDENTICAL across:
+     - `"attributes"` keys  
+     - all `"triples"`  
+     - `"entity_types"` keys  
+   - Do NOT rename the same entity in different places.  
+
+---
+
+**Guidelines for Extraction (Material Recommendation Oriented):**
+
+1. Strictly adhere to the provided Li–S Battery knowledge graph schema for nodes, relations, and attributes:
+
+```{schema}```
+
+2. Focus on extracting material-centric entities that are useful for material screening and recommendation:
+
+   - **SulfurHost** (unique sulfur host concept, including carbon-based or polar hosts via attributes)  
+   - **CatalystComponent**, **SingleAtomCatalyst**, **DualAtomCatalyst**  
+   - **ConductiveMaterial**, **CompositeMaterial**  
+   - **SeparatorMaterial**, **InterlayerMaterial**  
+   - **ElectrolyteSystem**, **SaltComponent**, **SolventComponent**, **AdditiveComponent**  
+   - **Morphology**, **Microstructure**, **SurfaceChemistry**, **DefectFeature**, **CrystalFeature**  
+   - **SynthesisMethod**, **ProcessingStep**, **ProcessingParameter**  
+   - **ElectrochemicalPerformance**  
+
+3. Prioritize extraction of composition and structural design information:
+
+   - What materials are used as sulfur hosts, catalysts, conductive frameworks, or separators  
+   - How they are combined using:
+     - `comprises`
+     - `forms_composite_with`
+     - `loaded_on`
+     - `decorated_with`
+     - `coated_on`
+    
+   - What architectures and morphologies they possess using:
+     - `has_morphology`
+     - `has_microstructure`
+     - `exhibits_feature`
+     - `possesses_defect`
+     - `has_surface_chemistry`  
+
+4. Synthesis and processing extraction (critical for reproducible material design):
+
+   - Extract synthesis routes and link using:
+     - `synthesized_by`
+     - `prepared_via`
+     - `involves_step`
+     - `controlled_by`  
+
+   - Capture key processing parameters such as temperature, time, atmosphere, and precursor type as attributes.
+
+5. Electrolyte and interface formulation extraction:
+
+   - Extract solvent, salt, and additive components as separate entities  
+   - Link them to **ElectrolyteSystem** using `comprises`  
+   - Record formulation descriptors such as:
+     - salt concentration  
+     - solvent system  
+     - additive type  
+     - E/S ratio  
+     - LiNO3 content  
+
+   - Capture their functional roles using:
+     - `suppresses_shuttle`
+     - `enhances_transport`
+     - `exhibits_property`  
+
+6. Performance extraction (core objective for material recommendation):
+
+   Extract and normalize key electrochemical performance metrics, including:
+
+   - initial capacity  
+   - areal capacity  
+   - capacity retention  
+   - cycle life  
+   - Coulombic efficiency  
+   - rate performance  
+   - lean electrolyte condition  
+
+   Store them as attributes of **ElectrochemicalPerformance** entities and link materials to performance using:
+
+   - `achieves_performance`  
+
+7. Design strategy and limitation extraction (useful for recommendation rules):
+
+   - Extract explicit design concepts and link using:
+     - `designed_via_strategy`
+     - `overcomes_limitation`
+     - `limited_by`
+     - `optimized_for`  
+
+   Examples:
+   - Host material — overcomes_limitation → Shuttle effect  
+   - Electrolyte system — optimized_for → Lean electrolyte condition  
+
+8. De-emphasize detailed reaction mechanisms:
+
+   - ReactionMechanism, AdsorptionBehavior, and CatalyticBehavior may be extracted ONLY when explicitly stated  
+   - Do NOT prioritize kinetic or pathway-level modeling  
+   - Focus on material composition, structure, formulation, and performance relationships  
+
+Text Chunk:
+    ```{chunk}```
+
+Example Output:
+
+{
+  "attributes": {
+    "TiO2_SulfurHost": [
+      "host_material_type: metal oxide",
+      "specific_surface_area: 320 m²/g",
+      "areal_sulfur_loading: 5 mg/cm²"
+    ],
+    "CNT_Framework": [
+      "material_type: carbon nanotube",
+      "electrical_conductivity: 400 S/cm"，
+      "dimensionality: 1D"
+    ],
+    "DOL_DME_Electrolyte": [
+      "salt_concentration: 1 M",
+      "solvent_system: DOL/DME (v/v 1:1)",
+      "LiNO3_content: 2 wt%",
+      "E_S_ratio: 6 μL mg-1"
+      "ionic_conductivity: 8.5 mS/cm"
+    ],
+    "LiTFSI_Salt": [
+      "chemical_name: lithium bis(trifluoromethanesulfonyl)imide",
+      "anion_type: TFSI⁻"
+    ],
+    "HighCapacity_Performance": [
+      "initial_capacity: 1380 mAh/g",
+      "cycle_life: 500 cycles",
+      "capacity_retention: 81%"
+      "coulombic_efficiency: 99.2%"
+    ]
+  },
+  "triples": [
+     ["TiO2_SulfurHost", "forms_composite_with", "CNT_ConductiveFramework"],
+     ["DOL_DME_1M_Electrolyte", "comprises", "LiTFSI_Salt"],
+     ["TiO2_SulfurHost", "achieves_performance", "HighCapacity_Performance"],
+     ["TiO2_SulfurHost", "overcomes_limitation", "Polysulfide_Shuttle_Effect"] 
+    ],
+  "entity_types": {
+    "TiO2_SulfurHost": "SulfurHost",
+    "CNT_ConductiveFramework": "ConductiveMaterial",
+    "DOL_DME_1M_Electrolyte": "ElectrolyteSystem",
+    "LiTFSI_Salt": "SaltComponent",
+    "HighCapacity_Performance": "ElectrochemicalPerformance"
+  }
+}
