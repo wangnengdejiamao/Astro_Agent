@@ -1,0 +1,3 @@
+timestamp,config_id,target_id,output_root,qc_pass,qc_warn,qc_fail,qc_verdict,physics_pass_rate,numeric_iou,claim_overlap,bibcode_jaccard,composite,reviewer_overall,wall_seconds,error
+2026-05-14T07:40:34Z,baseline,UPK13c2,output/analysis_agent/ablation_baseline_upk,0,0,0,dry-run,,,,,0.0,,0,
+2026-05-14T07:40:34Z,loo_kg_off,UPK13c2,output/analysis_agent/ablation_loo_kg_off_upk,0,0,0,dry-run,,,,,0.0,,0,

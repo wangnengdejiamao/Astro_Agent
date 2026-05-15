@@ -2,6 +2,10 @@
 .env
 **/.env
 .codex
+.claude/
+.service_pids
+.DS_Store
+**/.DS_Store
 
 # Python
 __pycache__/
@@ -17,6 +21,7 @@ env/
 node_modules/
 
 # Logs and temporary files
+logs/
 *.log
 *.tmp
 *.bak
@@ -72,3 +77,9 @@ literature/
 download_pdfs.py
 retry_failed.py
 verify_pdfs.py
+
+# Local/private notes and generated summaries
+TEST_REPORT.md
+技术报告_*.md
+技术路线报告_*.md
+graph_for_astronomy/configs/my_thesis_kg.yml

@@ -145,6 +145,26 @@ def load_model_config(provider: Optional[str] = None) -> ModelConfig:
             wire_api=os.getenv("GEMINI_WIRE_API", "chat_completions"),
             disable_response_storage=disable_storage,
         )
+    if selected in {"claude", "anthropic"}:
+        claude_key_env = "ANTHROPIC_API_KEY"
+        if not os.getenv(claude_key_env):
+            # User may have set the Claude relay key under LLM_API_KEY.
+            claude_key_env = "LLM_API_KEY" if os.getenv("LLM_API_KEY") else "ANTHROPIC_API_KEY"
+        return ModelConfig(
+            provider="claude",
+            model=os.getenv(
+                "CLAUDE_MODEL",
+                os.getenv("ANTHROPIC_MODEL", "claude-opus-4-7"),
+            ),
+            reasoning_effort=effort,
+            base_url=os.getenv(
+                "CLAUDE_BASE_URL",
+                os.getenv("ANTHROPIC_BASE_URL", "https://api.anthropic.com"),
+            ),
+            api_key_env=claude_key_env,
+            wire_api=os.getenv("CLAUDE_WIRE_API", "anthropic_messages"),
+            disable_response_storage=disable_storage,
+        )
     raise ValueError(f"Unsupported model provider: {selected}")
 
 
@@ -164,12 +184,24 @@ class LLMClient:
         user: str,
         temperature: float = 0.2,
         max_output_tokens: int = 5000,
+        cache_system: bool = True,
     ) -> str:
+        """Run an LLM completion.
+
+        cache_system: if True and the provider is Anthropic, the system prompt
+            (which is static across all sections of the same paper run) is
+            wrapped with ``cache_control: {"type": "ephemeral"}``. According
+            to Anthropic's 2026 docs this gives up to 90% input-token cost
+            reduction and 85% latency reduction for stable prefixes.
+            DeepSeek/OpenAI providers ignore the flag silently.
+        """
         if not self.available:
             raise RuntimeError(f"Missing API key environment variable: {self.config.api_key_env}")
+        if self.config.wire_api == "anthropic_messages":
+            return self._anthropic_messages(system, user, temperature, max_output_tokens, cache_system=cache_system)
         if self.config.wire_api == "responses":
-            return self._responses(system, user, temperature, max_output_tokens)
-        return self._chat_completions(system, user, temperature, max_output_tokens)
+            return self._responses(system, user, temperature, max_output_tokens, cache_system=cache_system)
+        return self._chat_completions(system, user, temperature, max_output_tokens, cache_system=cache_system)
 
     def _headers(self) -> Dict[str, str]:
         return {
@@ -183,11 +215,18 @@ class LLMClient:
         user: str,
         temperature: float,
         max_output_tokens: int,
+        cache_system: bool = True,
     ) -> str:
+        system_content: Any = system
+        if cache_system and "anthropic" in self.config.base_url.lower():
+            # Anthropic-style: cache the static system prefix to drop cost.
+            system_content = [
+                {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}},
+            ]
         payload: Dict[str, Any] = {
             "model": self.config.model,
             "input": [
-                {"role": "system", "content": system},
+                {"role": "system", "content": system_content},
                 {"role": "user", "content": user},
             ],
             "reasoning": {"effort": self.config.reasoning_effort},
@@ -214,19 +253,67 @@ class LLMClient:
                     chunks.append(str(part["text"]))
         return "\n".join(chunks).strip()
 
+    def _anthropic_messages(
+        self,
+        system: str,
+        user: str,
+        temperature: float,
+        max_output_tokens: int,
+        cache_system: bool = True,
+    ) -> str:
+        """Native Anthropic /v1/messages API. Used when provider=claude."""
+        system_block: Any = system
+        if cache_system:
+            system_block = [
+                {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}},
+            ]
+        payload: Dict[str, Any] = {
+            "model": self.config.model,
+            "system": system_block,
+            "messages": [{"role": "user", "content": user}],
+            "max_tokens": max_output_tokens,
+        }
+        if temperature is not None:
+            payload["temperature"] = temperature
+        headers = {
+            "x-api-key": os.environ[self.config.api_key_env],
+            "anthropic-version": os.getenv("ANTHROPIC_VERSION", "2023-06-01"),
+            "content-type": "application/json",
+        }
+        response = requests.post(
+            f"{self.config.base_url.rstrip('/')}/v1/messages",
+            headers=headers,
+            data=json.dumps(payload),
+            timeout=180,
+        )
+        response.raise_for_status()
+        data = response.json()
+        chunks: List[str] = []
+        for block in data.get("content", []):
+            if block.get("type") == "text" and "text" in block:
+                chunks.append(str(block["text"]))
+        return "\n".join(chunks).strip()
+
     def _chat_completions(
         self,
         system: str,
         user: str,
         temperature: float,
         max_output_tokens: int,
+        cache_system: bool = True,
     ) -> str:
+        if cache_system and "anthropic" in self.config.base_url.lower():
+            system_content: Any = [
+                {"type": "text", "text": system, "cache_control": {"type": "ephemeral"}},
+            ]
+            messages = [{"role": "system", "content": system_content},
+                        {"role": "user", "content": user}]
+        else:
+            messages = [{"role": "system", "content": system},
+                        {"role": "user", "content": user}]
         payload = {
             "model": self.config.model,
-            "messages": [
-                {"role": "system", "content": system},
-                {"role": "user", "content": user},
-            ],
+            "messages": messages,
             "temperature": temperature,
             "max_tokens": max_output_tokens,
         }

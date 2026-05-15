@@ -1,0 +1,42 @@
+{
+  "target": "UPK13-c2",
+  "alias": ["Gaia DR3 865415642195374464"],
+  "ra_deg": 92.225,
+  "dec_deg": 30.137,
+  "source_class": "white_dwarf_binary",
+  "reference": {
+    "bibcode": "2025ApJ...XXX...YY",
+    "authors": "Internal team",
+    "year": 2025,
+    "note": "User's reference paper used as the in-team gold standard for the white-dwarf + main-sequence dipper analysis with flat-bottom eclipse and difference-spectrum test."
+  },
+  "published_params": [
+    {"parameter": "P_orb",     "value": 13.5,   "error": null,  "unit": "day",  "section": "Results", "claim": "Orbital period from ZTF photometry."},
+    {"parameter": "T_eff_WD",  "value": 10500,  "error": 500,   "unit": "K",    "section": "Results", "claim": "WD effective temperature from SED 3-step decoupled fit."},
+    {"parameter": "T_eff_MS",  "value": 4200,   "error": 100,   "unit": "K",    "section": "Results", "claim": "K-dwarf companion effective temperature."},
+    {"parameter": "M_WD",      "value": 0.6,    "error": 0.05,  "unit": "Msun", "section": "Discussion","claim": "WD mass from Mass-Radius relation."},
+    {"parameter": "R_WD",      "value": 0.012,  "error": null,  "unit": "Rsun", "section": "Results", "claim": "WD radius from Eggleton 1983 Mass-Radius."},
+    {"parameter": "parallax",  "value": 1.013,  "error": 0.132, "unit": "mas",  "section": "Data",    "claim": "Gaia DR3 parallax with RUWE < 1.4."},
+    {"parameter": "pmRA",      "value": -0.62,  "error": 0.143, "unit": "mas/yr","section": "Data",   "claim": "Gaia DR3 proper motion."},
+    {"parameter": "pmDE",      "value": -4.26,  "error": 0.117, "unit": "mas/yr","section": "Data",   "claim": "Gaia DR3 proper motion."},
+    {"parameter": "chi2_kin",  "value": 10.57,  "error": null,  "unit": null,   "section": "Discussion","claim": "Cluster-membership kinematic chi^2 against Hunt+2023 UPK 13."},
+    {"parameter": "alpha_in",  "value": 86,     "error": null,  "unit": "deg",  "section": "Methods", "claim": "Inclination from eclipse fit."}
+  ],
+  "key_claims": [
+    "The source is a WD + K-dwarf binary with a 13.5-day orbital period.",
+    "Three competing hypotheses (single WD, WD+MS, MS+MS) are explicitly enumerated and the WD+MS classification is favoured by the flat-bottom eclipse test.",
+    "The Rayleigh-Jeans test rules out a bare-WD interpretation of the NIR/MIR colours.",
+    "Cluster membership in UPK 13 is rejected because chi^2_kin = 10.57 (> 9.0 cutoff) despite spatial proximity.",
+    "Photometric parallax is consistent with Gaia DR3 at the 1-sigma level."
+  ],
+  "expected_bibcodes": [
+    "1983ApJ...268..368E",
+    "2018A&A...616A...1G",
+    "2021AJ....161..147B",
+    "2023A&A...673A.114H",
+    "1994ApJ...421..651A",
+    "2019ApJ...871...63M",
+    "2013ApJS..208....9P"
+  ],
+  "physics_checks_should_pass": ["rayleigh_jeans", "ingress_time"]
+}

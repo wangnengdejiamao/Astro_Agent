@@ -292,7 +292,7 @@ def chunk_text(text: Any, datasets_no_chunk: List[str] = None, dataset_name: str
     title = ""
     if isinstance(text, dict):
         title = text.get('title', '')
-        text_content = text.get('text', '')
+        text_content = text.get('text', '') or text.get('content', '')
         if not text_content:
             return [], {}, title
         full_text = text_content.strip()
@@ -385,7 +385,7 @@ def chunk_corpus(input_file: str, output_file: str, dataset_name: str = None, da
     
     for idx, article in enumerate(corpus):
         title = article.get('title', '')
-        text = article.get('text', '')
+        text = article.get('text', '') or article.get('content', '')
         
         if not text:
             continue

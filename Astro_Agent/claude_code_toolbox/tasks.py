@@ -8,6 +8,7 @@ are finalized).
 
 from __future__ import annotations
 
+import json
 import uuid
 from typing import Any, Callable, Dict, Mapping
 
@@ -85,7 +86,7 @@ def build_code_review_task(inputs: Mapping[str, Any]) -> ClaudeCodeTask:
 
 
 # ---------------------------------------------------------------------------
-# Stub builders for the four phase-2 task types (still safe to execute)
+# Phase-2 task builders
 # ---------------------------------------------------------------------------
 
 def _stub_builder(
@@ -113,13 +114,55 @@ def _stub_builder(
     return _build
 
 
-build_tool_write_task = _stub_builder(
-    ClaudeCodeTaskType.TOOL_WRITE,
-    "Add new astro_toolbox tool",
-    "astro-tool-writer",
-    "You are astro-tool-writer. Implement a new tool, tests, and docs for the gap: {{gap}}",
-    ["astro_toolbox/", "tests/", "docs/"],
-)
+_TOOL_WRITE_DEFAULT = """\
+You are astro-tool-writer inside Astro_Agent. Implement a literature-derived
+analysis capability only from the bounded toolbox_gap JSON below.
+
+TOOLBOX_GAP_JSON:
+{{gap_json}}
+
+Rules:
+- Treat the RAG/KG references as provenance, not as permission to invent missing
+  equations or thresholds.
+- Inspect similar modules listed in the gap and follow their local style.
+- Add or patch only bounded files under astro_toolbox/, tests/, docs/, or the
+  run-local artifacts needed for validation.
+- The primary function must return a JSON-serializable dict with status,
+  products, warnings, provenance, and validation.
+- Add a smoke test or fixture that exercises success and a controlled failure.
+- Do not claim final science results when required inputs are missing.
+- Do not register a skill yourself unless the repository already has that
+  convention; the host will register after validation.
+
+Required final response: strict JSON with keys:
+validation_passed (bool), changed_files (list), tests (list), docs (list),
+risks (list), implementation_summary (string), skill_registration_notes (string).
+"""
+
+
+def build_tool_write_task(inputs: Mapping[str, Any]) -> ClaudeCodeTask:
+    gap = inputs.get("gap", {})
+    gap_json = json.dumps(gap, ensure_ascii=False, indent=2, default=str)
+    template = load_agent_prompt("astro-tool-writer") or _TOOL_WRITE_DEFAULT
+    prompt = render(template, {"gap": gap_json, "gap_json": gap_json})
+    target_module = ""
+    if isinstance(gap, Mapping):
+        target_module = str(gap.get("target_module") or "")
+    target_files = list(inputs.get("target_files", []))
+    if target_module:
+        target_files.append(f"astro_toolbox/{target_module}.py")
+    return ClaudeCodeTask(
+        task_id=_new_task_id("tool-write"),
+        type=ClaudeCodeTaskType.TOOL_WRITE,
+        title="Add validated astro_toolbox method",
+        prompt=prompt,
+        inputs=dict(inputs),
+        target_files=list(dict.fromkeys(target_files)),
+        allowed_write_dirs=["astro_toolbox/", "tests/", "docs/", "runs/"],
+        permission_mode=str(inputs.get("permission_mode", "plan")),
+        timeout_sec=int(inputs.get("timeout_sec", 900) or 900),
+        human_review_required=True,
+    )
 
 build_bug_fix_task = _stub_builder(
     ClaudeCodeTaskType.BUG_FIX,

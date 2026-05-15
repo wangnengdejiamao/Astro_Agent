@@ -17,14 +17,14 @@
 
 ## 2. API 配置（已就位）
 
-`.env` 在仓库根（**不入 git**），已写入 DeepSeek pro：
+`.env` 在仓库根（**不入 git**），写入你的 DeepSeek pro 配置：
 
 ```
 ASTRO_AGENT_MODEL_PROVIDER=deepseek
 DEEPSEEK_BASE_URL=https://api.deepseek.com
 DEEPSEEK_WIRE_API=chat_completions
 DEEPSEEK_MODEL=deepseek-v4-pro
-DEEPSEEK_API_KEY=sk-fbdd4d9358ad4998be7fd3bd370b79f7
+DEEPSEEK_API_KEY=your_deepseek_api_key_here
 
 # 同 key 可走 OpenAI / Anthropic 兼容端点
 OPENAI_BASE_URL=https://api.deepseek.com

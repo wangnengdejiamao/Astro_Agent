@@ -34,8 +34,6 @@ def query_spectrum(ra, dec, radius_arcsec=config.SEARCH_RADIUS_ARCSEC,
                                save_fits=save_fits, save_png=save_png)
 
 
-# 重导出, 方便其他脚本使用
-try:
-    from desi_spectrum_tool import DESITool, SpectrumExtractor
-except ImportError:
-    pass
+# Re-export for orchestration scripts.  Keep the dependency error visible so a
+# missing DESI helper dependency does not look like a missing class.
+from desi_spectrum_tool import DESITool, SpectrumExtractor

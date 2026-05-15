@@ -199,11 +199,11 @@ def save_text(path, text):
         fh.write(text)
 
 
-def run_module(status_rows, output_root, module_name, func, output_dir):
+def run_module(status_rows, output_root, module_name, func, output_dir,
+               timeout_sec=180):
     def _handle_timeout(signum, frame):
         raise TimeoutError(f"module timed out after {timeout_sec}s")
 
-    timeout_sec = 180
     try:
         previous = signal.signal(signal.SIGALRM, _handle_timeout)
         signal.alarm(timeout_sec)
@@ -288,10 +288,17 @@ def main():
     sdss_phot = sdss_pack.get("photometry") if sdss_pack else {}
 
     desi_dir = ensure_dir(os.path.join(output_root, "desi"))
-    def _run_desi():
-        tool = DESITool(output_dir=desi_dir, log_func=print)
-        return tool.process_single(ra, dec, show_plot=False, save_fits=True, save_png=True)
-    desi_res = run_module(status_rows, output_root, "desi", _run_desi, desi_dir)
+    desi_catalog = os.path.join(PARENT_DIR, "data", "mws_gaia.csv")
+    if not os.path.exists(desi_catalog):
+        add_status(status_rows, output_root, "desi", "skipped",
+                   output_dir=desi_dir,
+                   note=f"local DESI MWS catalog missing: {desi_catalog}")
+        desi_res = None
+    else:
+        def _run_desi():
+            tool = DESITool(output_dir=desi_dir, log_func=print)
+            return tool.process_single(ra, dec, show_plot=False, save_fits=True, save_png=True)
+        desi_res = run_module(status_rows, output_root, "desi", _run_desi, desi_dir)
     results["DESI"] = desi_res
 
     galah_dir = ensure_dir(os.path.join(output_root, "galah"))
@@ -361,31 +368,42 @@ def main():
             spherex.save_photometry_csv(phot, spherex_dir)
             res["photometry"] = phot
         return res or None
-    spherex_pack = run_module(status_rows, output_root, "spherex", _run_spherex, spherex_dir)
+    if os.getenv("ASTRO_TOOLBOX_SKIP_SPHEREX", "").lower() in {"1", "true", "yes"}:
+        add_status(status_rows, output_root, "spherex", "skipped",
+                   output_dir=spherex_dir, note="ASTRO_TOOLBOX_SKIP_SPHEREX is set")
+        spherex_pack = None
+    else:
+        spherex_pack = run_module(status_rows, output_root, "spherex", _run_spherex, spherex_dir)
     results["SPHEREx"] = spherex_pack.get("spectrum") if spherex_pack else None
     spherex_phot = spherex_pack.get("photometry") if spherex_pack else {}
 
     koa_dir = ensure_dir(os.path.join(output_root, "koa"))
     koa_work = ensure_dir(os.path.join(koa_dir, "work"))
-    def _run_koa():
-        res = koa.download_and_extract_spectrum(
-            ra=ra,
-            dec=dec,
-            target=target.replace(" ", ""),
-            instruments=("lris",),
-            work_dir=koa_work,
-            output_dir=koa_dir,
-            download=True,
-            calibfile=False,
-            lev0file=True,
-            lev1file=False,
-            row_limit=2,
-            auto_pypeit=True,
-            pypeit_setup_only=True,
-        )
-        save_json(os.path.join(koa_dir, "koa_result.json"), summarize_result(res))
-        return res
-    koa_res = run_module(status_rows, output_root, "koa", _run_koa, koa_dir)
+    if os.getenv("ASTRO_TOOLBOX_ENABLE_KOA", "").lower() not in {"1", "true", "yes"}:
+        add_status(status_rows, output_root, "koa", "skipped",
+                   output_dir=koa_dir,
+                   note="online KOA disabled; set ASTRO_TOOLBOX_ENABLE_KOA=1 to query/download Keck raw products")
+        koa_res = None
+    else:
+        def _run_koa():
+            res = koa.download_and_extract_spectrum(
+                ra=ra,
+                dec=dec,
+                target=target.replace(" ", ""),
+                instruments=("lris",),
+                work_dir=koa_work,
+                output_dir=koa_dir,
+                download=True,
+                calibfile=False,
+                lev0file=True,
+                lev1file=False,
+                row_limit=2,
+                auto_pypeit=True,
+                pypeit_setup_only=True,
+            )
+            save_json(os.path.join(koa_dir, "koa_result.json"), summarize_result(res))
+            return res
+        koa_res = run_module(status_rows, output_root, "koa", _run_koa, koa_dir)
     if isinstance(koa_res, dict) and "wavelength" in koa_res:
         results["KOA_spectrum"] = koa_res
     else:
@@ -436,7 +454,7 @@ def main():
             tess.plot_lightcurve(res, os.path.join(tess_dir, "tess_lightcurve.png"))
             tess.save_csv(res, tess_dir)
         return res
-    results["TESS"] = run_module(status_rows, output_root, "tess", _run_tess, tess_dir)
+    results["TESS"] = run_module(status_rows, output_root, "tess", _run_tess, tess_dir, timeout_sec=900)
 
     kepler_dir = ensure_dir(os.path.join(output_root, "kepler"))
     def _run_kepler():
@@ -700,6 +718,21 @@ def main():
     # Final combined plot refresh after period analysis and RV products.
     run_module(status_rows, output_root, "combined_plots_final", _run_combined, combined_dir)
 
+    report_dir = ensure_dir(os.path.join(output_root, "compact_binary_report"))
+    def _run_compact_binary_report():
+        from astro_toolbox.compact_binary_report import build_report, write_report
+
+        report = build_report(output_root, target=target, ra=ra, dec=dec)
+        files = write_report(report, report_dir)
+        return {"status": "written", "files": files}
+    compact_report = run_module(
+        status_rows,
+        output_root,
+        "compact_binary_report",
+        _run_compact_binary_report,
+        report_dir,
+    )
+
     final_summary = {
         "target": target,
         "ra_deg": ra,
@@ -711,6 +744,7 @@ def main():
         "rv_correction_available": rv_corr is not None,
         "cooling_age_available": cool_res is not None,
         "xray_detected": bool((xray_pack or {}).get("analysis", {}).get("n_detections")),
+        "compact_binary_report": compact_report,
         "status_file": os.path.join(output_root, "module_status.csv"),
     }
     save_json(os.path.join(output_root, "run_summary.json"), final_summary)

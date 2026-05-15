@@ -1,0 +1,46 @@
+{
+  "target": "ZTFJ2130+4420",
+  "alias": ["ZTF J213056.71+442046.5"],
+  "ra_deg": 322.7363,
+  "dec_deg": 44.3463,
+  "source_class": "double_white_dwarf",
+  "reference": {
+    "bibcode": "2020ApJ...905...32B",
+    "authors": "Kupfer, Bauer, Burdge et al.",
+    "year": 2020,
+    "title": "A New Class of Roche Lobe-filling Hot Subdwarf Binaries",
+    "doi": "10.3847/1538-4357/abc1b3",
+    "note": "Cited as the canonical multi-method WD+sdB analysis used in our ablation. The published_params below were extracted manually from the paper Tables 1-4 and Section 4."
+  },
+  "published_params": [
+    {"parameter": "P_orb",    "value": 39.34,  "error": 0.02,  "unit": "min",     "section": "Results", "claim": "Orbital period from ZTF light curve and Keck spectroscopy."},
+    {"parameter": "T_eff_sdB","value": 42400,  "error": 300,   "unit": "K",       "section": "Results", "claim": "Effective temperature of the hot subdwarf primary from SED fit."},
+    {"parameter": "log_g_sdB","value": 5.83,   "error": 0.05,  "unit": "cgs",     "section": "Results", "claim": "Surface gravity of the sdB from atmosphere model."},
+    {"parameter": "M_sdB",    "value": 0.337,  "error": 0.015, "unit": "Msun",    "section": "Results", "claim": "sdB mass from orbital + atmosphere joint solution."},
+    {"parameter": "M_WD",     "value": 0.545,  "error": 0.020, "unit": "Msun",    "section": "Results", "claim": "Unseen white-dwarf companion mass from RV semiamplitude + sdB mass."},
+    {"parameter": "R_sdB",    "value": 0.21,   "error": 0.01,  "unit": "Rsun",    "section": "Results", "claim": "Roche-lobe filling sdB radius."},
+    {"parameter": "distance", "value": 760,    "error": 40,    "unit": "pc",      "section": "Data",    "claim": "Distance from Gaia DR2 parallax."},
+    {"parameter": "K_sdB",    "value": 413.0,  "error": 7.0,   "unit": "km/s",    "section": "Results", "claim": "Radial-velocity semi-amplitude from Keck/LRIS spectra."},
+    {"parameter": "tau_GW",   "value": 39,     "error": 1,     "unit": "Myr",     "section": "Discussion", "claim": "Gravitational-wave inspiral timescale to merger."}
+  ],
+  "key_claims": [
+    "The system is a Roche-lobe filling hot subdwarf (sdB) plus white dwarf binary with a 39.3-minute orbital period.",
+    "The sdB is overfilling its Roche lobe and transferring mass to the unseen WD companion.",
+    "The system is a likely AM CVn progenitor.",
+    "The orbital decay timescale from gravitational radiation is approximately 39 Myr.",
+    "The eclipse depth and shape rule out a main-sequence companion via the Rayleigh-Jeans / ingress test.",
+    "The radial-velocity semi-amplitude combined with sdB mass yields a WD mass of 0.545 +/- 0.02 Msun."
+  ],
+  "expected_bibcodes": [
+    "2020ApJ...905...32B",
+    "2019Natur.571..528B",
+    "2016PASP..128c5003B",
+    "2018A&A...616A...1G",
+    "2017A&A...600A..50H",
+    "2014A&A...570A..70H",
+    "1983ApJ...268..368E",
+    "1994ApJ...421..651A",
+    "2021AJ....161..147B"
+  ],
+  "physics_checks_should_pass": ["rayleigh_jeans", "ingress_time", "tidal_truncation", "mass_lum_sanity"]
+}

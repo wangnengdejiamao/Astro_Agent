@@ -25,6 +25,10 @@ import shutil
 import sqlite3
 import subprocess
 import sys
+import time
+import urllib.parse
+import urllib.request
+import xml.etree.ElementTree as ET
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from pathlib import Path
 from typing import Any, Dict, Iterable, List, Optional, Tuple
@@ -44,6 +48,9 @@ RAG_DB = REPO_ROOT / "rag_pipeline" / "index" / "white_dwarf_rag.sqlite"
 KG_INDEX = REPO_ROOT / "graph_for_astronomy" / "output" / "white_dwarf_kg" / "kg_index.sqlite"
 METADATA_JSON = REPO_ROOT / "literature" / "ads_complete_20260416" / "COMPLETE_DATASET.json"
 PDF_DIR = REPO_ROOT / "literature" / "pdfs"
+
+
+ARXIV_NS = {"atom": "http://www.w3.org/2005/Atom"}
 
 
 def ensure_dir(path: Path) -> Path:
@@ -184,39 +191,182 @@ def read_local_simbad_references(run_roots: Path | list[Path]) -> dict[str, Any]
     }
 
 
+def _safe_pdf_name(bibcode: str) -> str:
+    return re.sub(r"[^A-Za-z0-9._+-]+", "_", bibcode.strip())
+
+
+def _pdf_path_for_bibcode(bibcode: str) -> Path:
+    return PDF_DIR / f"{_safe_pdf_name(bibcode)}.pdf"
+
+
+def _normalize_title(text: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "", text.lower())
+
+
+def _arxiv_id_from_bibcode(bibcode: str) -> str:
+    match = re.search(r"arXiv(\d{2})(\d{2})(\d{5})", bibcode)
+    if match:
+        return f"{match.group(1)}{match.group(2)}.{match.group(3)}"
+    return ""
+
+
+def _arxiv_id_from_ref(ref: dict[str, Any]) -> str:
+    for key in ("arxiv", "eprint", "identifier", "url", "abstract", "title"):
+        text = str(ref.get(key) or "")
+        match = re.search(r"arXiv[:\s]*([0-9]{4}\.[0-9]{4,5}(?:v[0-9]+)?)", text, re.I)
+        if match:
+            return match.group(1)
+    return _arxiv_id_from_bibcode(str(ref.get("bibcode") or ""))
+
+
+def _download_binary(url: str, output_path: Path, timeout: int = 90) -> tuple[bool, str]:
+    ensure_dir(output_path.parent)
+    req = urllib.request.Request(
+        url,
+        headers={"User-Agent": "Astro_Agent source research PDF resolver"},
+    )
+    tmp_path = output_path.with_suffix(output_path.suffix + ".part")
+    try:
+        with urllib.request.urlopen(req, timeout=timeout) as resp, tmp_path.open("wb") as fh:
+            while True:
+                chunk = resp.read(1024 * 256)
+                if not chunk:
+                    break
+                fh.write(chunk)
+        data_head = tmp_path.read_bytes()[:8]
+        if not data_head.startswith(b"%PDF"):
+            tmp_path.unlink(missing_ok=True)
+            return False, "downloaded file is not a PDF"
+        tmp_path.replace(output_path)
+        return True, f"downloaded {url}"
+    except Exception as exc:
+        tmp_path.unlink(missing_ok=True)
+        return False, f"{type(exc).__name__}: {exc}"
+
+
+def _query_arxiv_by_title(title: str, timeout: int = 45) -> dict[str, str]:
+    if not title.strip():
+        return {}
+    query = urllib.parse.urlencode(
+        {
+            "search_query": f'ti:"{title.strip()}"',
+            "start": "0",
+            "max_results": "3",
+        }
+    )
+    url = f"https://export.arxiv.org/api/query?{query}"
+    try:
+        with urllib.request.urlopen(url, timeout=timeout) as resp:
+            xml_text = resp.read().decode("utf-8", errors="replace")
+        root = ET.fromstring(xml_text)
+        target_norm = _normalize_title(title)
+        for entry in root.findall("atom:entry", ARXIV_NS):
+            entry_title = " ".join((entry.findtext("atom:title", default="", namespaces=ARXIV_NS) or "").split())
+            entry_norm = _normalize_title(entry_title)
+            if not entry_norm:
+                continue
+            if target_norm and (target_norm in entry_norm or entry_norm in target_norm):
+                entry_id = entry.findtext("atom:id", default="", namespaces=ARXIV_NS) or ""
+                arxiv_id = entry_id.rstrip("/").split("/")[-1]
+                return {"arxiv_id": arxiv_id, "title": entry_title, "api_url": url}
+    except Exception:
+        return {}
+    return {}
+
+
+def _download_ref_pdf_fallback(ref: dict[str, Any]) -> dict[str, Any]:
+    bibcode = str(ref.get("bibcode") or "").strip()
+    pdf_path = _pdf_path_for_bibcode(bibcode)
+    if pdf_path.exists() and pdf_path.stat().st_size > 0:
+        return {
+            "bibcode": bibcode,
+            "downloaded": True,
+            "info": "already exists",
+            "pdf_path": str(pdf_path),
+            "resolver": "local_cache",
+        }
+
+    arxiv_id = _arxiv_id_from_ref(ref)
+    resolver = "arxiv_id"
+    if not arxiv_id:
+        # arXiv asks clients to avoid rapid-fire API calls; this path is only
+        # used when the local ADS/arXiv downloader is unavailable.
+        time.sleep(3.0)
+        hit = _query_arxiv_by_title(str(ref.get("title") or ""))
+        arxiv_id = hit.get("arxiv_id", "")
+        resolver = "arxiv_title" if arxiv_id else "unresolved"
+
+    if not arxiv_id:
+        return {
+            "bibcode": bibcode,
+            "downloaded": False,
+            "info": "no arXiv PDF resolved from bibcode/title",
+            "pdf_path": "",
+            "resolver": resolver,
+        }
+
+    ok, info = _download_binary(f"https://arxiv.org/pdf/{arxiv_id}", pdf_path)
+    return {
+        "bibcode": bibcode,
+        "downloaded": bool(ok),
+        "info": info,
+        "pdf_path": str(pdf_path) if pdf_path.exists() else "",
+        "resolver": resolver,
+        "arxiv_id": arxiv_id,
+    }
+
+
 def download_simbad_pdfs(refs: list[dict[str, Any]], max_workers: int = 4) -> dict[str, Any]:
     """Download all SIMBAD bibcode PDFs using the local ADS/arXiv downloader."""
     sys.path.insert(0, str(REPO_ROOT))
     try:
         import retry_failed
     except Exception as exc:
-        return {"status": "error", "error": f"cannot import retry_failed: {exc}", "rows": []}
+        retry_failed = None
+        import_error = f"{type(exc).__name__}: {exc}"
+    else:
+        import_error = ""
 
-    bibcodes = [str(r.get("bibcode") or "").strip() for r in refs if r.get("bibcode")]
-    bibcodes = sorted(set(bibcodes), reverse=True)
+    ref_by_bibcode = {
+        str(r.get("bibcode") or "").strip(): r
+        for r in refs
+        if str(r.get("bibcode") or "").strip()
+    }
+    bibcodes = sorted(ref_by_bibcode, reverse=True)
     rows = []
     if not bibcodes:
         return {"status": "empty", "rows": rows}
 
     def worker(bib: str) -> dict[str, Any]:
+        if retry_failed is None:
+            return _download_ref_pdf_fallback(ref_by_bibcode[bib])
         ok, info = retry_failed.download_pdf(bib)
         return {
             "bibcode": bib,
             "downloaded": bool(ok),
             "info": info,
-            "pdf_path": str(PDF_DIR / f"{bib}.pdf") if (PDF_DIR / f"{bib}.pdf").exists() else "",
+            "pdf_path": str(_pdf_path_for_bibcode(bib)) if _pdf_path_for_bibcode(bib).exists() else "",
+            "resolver": "retry_failed",
         }
 
-    with ThreadPoolExecutor(max_workers=max_workers) as ex:
-        futures = {ex.submit(worker, bib): bib for bib in bibcodes}
-        for fut in as_completed(futures):
+    if retry_failed is None:
+        for bib in bibcodes:
             try:
-                rows.append(fut.result())
+                rows.append(worker(bib))
             except Exception as exc:
-                rows.append({"bibcode": futures[fut], "downloaded": False, "info": f"{type(exc).__name__}: {exc}", "pdf_path": ""})
+                rows.append({"bibcode": bib, "downloaded": False, "info": f"{type(exc).__name__}: {exc}", "pdf_path": ""})
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futures = {ex.submit(worker, bib): bib for bib in bibcodes}
+            for fut in as_completed(futures):
+                try:
+                    rows.append(fut.result())
+                except Exception as exc:
+                    rows.append({"bibcode": futures[fut], "downloaded": False, "info": f"{type(exc).__name__}: {exc}", "pdf_path": ""})
     rows.sort(key=lambda r: r["bibcode"], reverse=True)
     return {
-        "status": "ok",
+        "status": "ok" if retry_failed is not None else "ok_fallback_arxiv",
+        "fallback_reason": import_error,
         "n_total": len(bibcodes),
         "n_available_pdf": sum(1 for r in rows if r.get("pdf_path")),
         "rows": rows,
@@ -256,7 +406,7 @@ def source_mentions(refs: list[dict[str, Any]], identifiers: list[str]) -> list[
             if pat.search(text_fields):
                 chunks.append(text_fields[:1600])
                 break
-        pdf_path = PDF_DIR / f"{bib}.pdf"
+        pdf_path = _pdf_path_for_bibcode(bib)
         if pdf_path.exists():
             text = pdf_text(pdf_path)
             for pat in patterns:
@@ -280,6 +430,60 @@ def source_mentions(refs: list[dict[str, Any]], identifiers: list[str]) -> list[
             }
         )
     return rows
+
+
+def _identifier_variants(name: str) -> list[str]:
+    clean = " ".join(str(name or "").strip().split())
+    if not clean:
+        return []
+    variants = {clean, clean.replace(" ", "")}
+    if clean.upper().startswith("ZTF J"):
+        variants.add("ZTFJ" + clean[5:])
+    if clean.upper().startswith("ZTFJ"):
+        variants.add("ZTF J" + clean[4:])
+
+    match = re.search(r"J(\d{2})(\d{2})(\d{2}(?:\.\d+)?)([+-])(\d{2})(\d{2})(\d{2}(?:\.\d+)?)", clean)
+    if match:
+        hh, mm, _ss, sign, dd, dm, _ds = match.groups()
+        short = f"J{hh}{mm}{sign}{dd}{dm}"
+        variants.update({short, f"ZTF {short}", f"ZTF{short}"})
+        long_id = clean[match.start():match.end()]
+        variants.update({long_id, f"ZTF {long_id}", f"ZTF{long_id}"})
+    return sorted(variants, key=lambda x: (len(x), x), reverse=True)
+
+
+def query_simbad_object_ids(main_id: str) -> list[str]:
+    if not main_id:
+        return []
+    try:
+        from astroquery.simbad import Simbad
+
+        table = Simbad.query_objectids(main_id)
+        if table is None:
+            return []
+        col = "ID" if "ID" in table.colnames else table.colnames[0]
+        return [str(row[col]).strip() for row in table if str(row[col]).strip()]
+    except Exception:
+        return []
+
+
+def build_source_identifiers(target: str, simbad: dict[str, Any], ra: float, dec: float) -> list[str]:
+    identifiers: list[str] = []
+
+    def add(value: str) -> None:
+        for variant in _identifier_variants(value):
+            if variant and variant not in identifiers:
+                identifiers.append(variant)
+
+    add(target)
+    add(str(simbad.get("main_id") or ""))
+    for object_id in query_simbad_object_ids(str(simbad.get("main_id") or target)):
+        add(object_id)
+
+    coord_tag = f"RA={ra:.6f}, Dec={dec:.6f}"
+    if coord_tag not in identifiers:
+        identifiers.append(coord_tag)
+    return identifiers[:160]
 
 
 def rag_exact_bibcodes(bibcodes: Iterable[str]) -> list[dict[str, Any]]:
@@ -863,8 +1067,12 @@ def build_markdown_report(package: dict[str, Any]) -> str:
         f"Target: {package['target']}",
         f"Coordinates: RA={package['ra_deg']}, Dec={package['dec_deg']} deg",
         "",
+        "## Source Identifiers",
+        ", ".join(package.get("source_identifiers", [])[:24]) or "No identifiers resolved.",
+        "",
         "## SIMBAD References",
         f"SIMBAD returned n_refs={package.get('simbad', {}).get('n_refs', 0)}.",
+        f"PDF downloader status={package.get('downloads', {}).get('status', 'unknown')}; available={package.get('downloads', {}).get('n_available_pdf', 0)}.",
     ]
     for ref in package.get("source_mentions", []):
         mark = "mentions source" if ref.get("mentions_source") else "no direct mention in extracted text"
@@ -923,16 +1131,8 @@ def main() -> None:
         downloads = download_simbad_pdfs(refs)
     write_json(out_root / "simbad_pdf_downloads.json", downloads)
 
-    identifiers = [
-        args.target,
-        "ZTFJ152934.91+292801.87",
-        "SDSS J152934.98+292801.9",
-        "SDSS J152934.98+292801.8",
-        "J1529+2928",
-        "CSO 1094",
-        "Gaia DR3 1273456463234876288",
-        "1273456463234876288",
-    ]
+    identifiers = build_source_identifiers(args.target, simbad, args.ra, args.dec)
+    write_json(out_root / "source_identifiers.json", identifiers)
     mentions = source_mentions(refs, identifiers)
     write_json(out_root / "simbad_source_mentions.json", mentions)
     rag_rows = rag_exact_bibcodes([r.get("bibcode", "") for r in refs])
@@ -948,6 +1148,14 @@ def main() -> None:
         "line_fits": analyze_spectra(analysis_roots, analysis_dir),
         "copied_toolbox_figures": copy_core_figures(analysis_roots, analysis_dir),
     }
+    try:
+        sys.path.insert(0, str(ASTRO_AGENT_DIR))
+        from astro_toolbox.compact_binary_report import build_report, write_report
+
+        compact = build_report(analysis_roots[0], target=args.target, ra=args.ra, dec=args.dec)
+        analysis["compact_binary_report"] = write_report(compact, analysis_dir / "compact_binary_report")
+    except Exception as exc:
+        analysis["compact_binary_report"] = {"status": "error", "error": f"{type(exc).__name__}: {exc}"}
     analysis["figure_manifest"] = build_figure_manifest(analysis)
     write_json(out_root / "source_analysis_products.json", analysis)
 
@@ -957,6 +1165,7 @@ def main() -> None:
         "dec_deg": args.dec,
         "astrotool": astrotool,
         "simbad": simbad,
+        "source_identifiers": identifiers,
         "downloads": downloads,
         "source_mentions": mentions,
         "rag_exact_papers": rag_rows,

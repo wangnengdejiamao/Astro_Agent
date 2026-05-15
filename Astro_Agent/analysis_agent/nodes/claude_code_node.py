@@ -9,6 +9,7 @@ from __future__ import annotations
 
 from typing import Any, Dict
 
+from analysis_agent import method_learning
 from claude_code_toolbox import ClaudeCodeTask
 from claude_code_toolbox.client import make_default_client
 from claude_code_toolbox.safety.output_guard import (
@@ -62,6 +63,10 @@ def claude_code_execute_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 "raw_output_path": result.raw_output_path,
             }
         elif task.type is ClaudeCodeTaskType.TOOL_WRITE:
+            registration = method_learning.register_dynamic_skill_if_valid(
+                gap=task.inputs.get("gap"),
+                claude_result=result.model_dump(mode="json"),
+            )
             reports["toolbox_gap_report"] = {
                 "status": result.status.value,
                 "patch_summary": result.patch_summary or result.summary,
@@ -70,7 +75,9 @@ def claude_code_execute_node(state: Dict[str, Any]) -> Dict[str, Any]:
                 "docs": result.docs,
                 "risks": result.risks,
                 "human_review_required": result.human_review_required,
+                "dynamic_skill_registration": registration,
             }
+            state["dynamic_skill_registration"] = registration
 
         results.append(result.model_dump(mode="json"))
 

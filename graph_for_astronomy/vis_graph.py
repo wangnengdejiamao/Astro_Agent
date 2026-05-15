@@ -6,6 +6,7 @@ import os
 import sys
 import glob
 import re
+from pathlib import Path
 from typing import Optional, Dict, Any, List
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,14 +20,37 @@ current_dir = os.path.dirname(os.path.abspath(__file__))
 if current_dir not in sys.path:
     sys.path.insert(0, current_dir)
 
+from dotenv import load_dotenv
+
+ENV_PATH = Path(current_dir) / ".env"
+load_dotenv(ENV_PATH)
+
+
+def _normalize_env_path(name: str) -> None:
+    value = os.getenv(name)
+    if not value:
+        return
+    path = Path(value).expanduser()
+    if not path.is_absolute():
+        path = Path(current_dir) / path
+    os.environ[name] = str(path.resolve())
+
+
+for _env_path_name in (
+    "PROJECT_DIR",
+    "PROJECT_ROOT",
+    "OUTPUT_DIR",
+    "GRAPHRAG_DIR",
+    "GRAPH_INDEX_CACHE_DIR",
+    "GRAPH_RETRIEVER_CACHE_DIR",
+):
+    _normalize_env_path(_env_path_name)
+
 from graph_tools.graph_util import GraphAnalyzer
 from graph_tools.retriever import GraphRetriever
 
-from dotenv import load_dotenv
-load_dotenv()
-
 # 图谱数据目录
-OUTPUT_DIR = os.getenv("OUTPUT_DIR")
+OUTPUT_DIR = os.getenv("OUTPUT_DIR") or os.path.join(os.path.dirname(os.path.abspath(__file__)), "output")
 
 # 项目根目录（与 vis_graph_v1 一致，供 staged examples 等路径解析）
 PROJECT_DIR = os.getenv("PROJECT_DIR") or os.path.dirname(os.path.abspath(__file__))
@@ -45,9 +69,74 @@ app.add_middleware(
 
 # 缓存GraphAnalyzer实例
 _analyzer_cache: Dict[str, GraphAnalyzer] = {}
+_json_file_cache: Dict[str, Dict[str, Any]] = {}
 
 # GraphRetriever实例用于获取chunk内容
 graph_retriever = GraphRetriever()
+
+
+def _safe_path_part(value: str, field_name: str) -> str:
+    """Validate a single path segment received from the browser."""
+    if not value:
+        raise HTTPException(status_code=400, detail=f"{field_name} 不能为空")
+    if os.path.isabs(value) or "/" in value or "\\" in value or value in {".", ".."}:
+        raise HTTPException(status_code=400, detail=f"{field_name} 不能包含路径分隔符: {value}")
+    return value
+
+
+def _read_json_file(path: str) -> Any:
+    """Read a JSON file with a small mtime cache for large source profile files."""
+    if not os.path.exists(path):
+        raise HTTPException(status_code=404, detail=f"文件不存在: {path}")
+    try:
+        mtime = os.path.getmtime(path)
+        cached = _json_file_cache.get(path)
+        if cached and cached.get("mtime") == mtime:
+            return cached.get("data")
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
+        _json_file_cache[path] = {"mtime": mtime, "data": data}
+        return data
+    except json.JSONDecodeError as e:
+        raise HTTPException(status_code=500, detail=f"JSON 解析失败: {path}: {str(e)}")
+
+
+def _resolve_pipeline_run_dir(dataset_name: str, timestamp: Optional[str] = None) -> str:
+    """Resolve output/{dataset}/{run} for pipeline-style KG files."""
+    dataset_name = _safe_path_part(dataset_name, "dataset_name")
+    dataset_dir = os.path.join(OUTPUT_DIR, dataset_name)
+    if not os.path.isdir(dataset_dir):
+        raise HTTPException(status_code=404, detail=f"数据集目录不存在: {dataset_dir}")
+
+    if timestamp:
+        timestamp = _safe_path_part(timestamp, "timestamp")
+        run_dir = os.path.join(dataset_dir, timestamp)
+        if not os.path.isdir(run_dir):
+            raise HTTPException(status_code=404, detail=f"运行目录不存在: {run_dir}")
+        return run_dir
+
+    preferred = os.path.join(dataset_dir, "production_full")
+    if os.path.isdir(preferred):
+        return preferred
+
+    candidates = [
+        os.path.join(dataset_dir, item)
+        for item in os.listdir(dataset_dir)
+        if os.path.isdir(os.path.join(dataset_dir, item))
+        and os.path.exists(os.path.join(dataset_dir, item, "summary.json"))
+    ]
+    if not candidates:
+        raise HTTPException(status_code=404, detail=f"未找到可用的图谱运行目录: {dataset_dir}")
+    return max(candidates, key=os.path.getmtime)
+
+
+def _resolve_pipeline_file(dataset_name: str, timestamp: Optional[str], filename: str) -> str:
+    filename = _safe_path_part(filename, "filename")
+    run_dir = _resolve_pipeline_run_dir(dataset_name, timestamp)
+    file_path = os.path.join(run_dir, filename)
+    if not os.path.exists(file_path):
+        raise HTTPException(status_code=404, detail=f"图谱文件不存在: {file_path}")
+    return file_path
 
 
 def get_chunk_path(dataset_name: str) -> str:
@@ -579,6 +668,88 @@ async def list_datasets():
         raise HTTPException(status_code=500, detail=error_detail)
 
 
+@app.get("/api/kg-summary/{dataset_name}")
+async def get_kg_summary(
+    dataset_name: str,
+    timestamp: Optional[str] = None,
+    filename: str = "multi_stage_deduplicated.json",
+):
+    """Return the source-feature KG summary used by the white dwarf frontend."""
+    try:
+        graph_path = _resolve_pipeline_file(dataset_name, timestamp, filename)
+        run_dir = os.path.dirname(graph_path)
+        summary_path = os.path.join(run_dir, "summary.json")
+        summary = _read_json_file(summary_path)
+        if not isinstance(summary, dict):
+            raise HTTPException(status_code=500, detail=f"summary.json 格式错误: {summary_path}")
+        result = dict(summary)
+        result["dataset_name"] = dataset_name
+        result["timestamp"] = os.path.basename(run_dir)
+        result["graph_file"] = os.path.basename(graph_path)
+        return result
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_detail = f"读取图谱摘要失败: {str(e)}\n{traceback.format_exc()}"
+        raise HTTPException(status_code=500, detail=error_detail)
+
+
+@app.get("/api/source-profiles/{dataset_name}")
+async def get_source_profiles(
+    dataset_name: str,
+    timestamp: Optional[str] = None,
+    filename: str = "multi_stage_deduplicated.json",
+    feature: Optional[str] = None,
+    source: Optional[str] = None,
+    limit: int = 40,
+):
+    """Return filtered source profiles for the canvas/profile frontend."""
+    try:
+        graph_path = _resolve_pipeline_file(dataset_name, timestamp, filename)
+        run_dir = os.path.dirname(graph_path)
+        profiles_path = os.path.join(run_dir, "source_profiles.json")
+        profiles_data = _read_json_file(profiles_path)
+        if not isinstance(profiles_data, dict):
+            raise HTTPException(status_code=500, detail=f"source_profiles.json 格式错误: {profiles_path}")
+
+        source_query = (source or "").strip().lower()
+        safe_limit = max(1, min(int(limit or 40), 500))
+        profiles: List[Dict[str, Any]] = []
+
+        for source_name, profile in profiles_data.items():
+            if not isinstance(profile, dict):
+                continue
+            if source_query and source_query not in str(source_name).lower():
+                continue
+
+            features = profile.get("features") if isinstance(profile.get("features"), dict) else {}
+            if feature and feature not in features:
+                continue
+
+            feature_score = int(features.get(feature, 0)) if feature else sum(int(v or 0) for v in features.values())
+            item = dict(profile)
+            item["source"] = source_name
+            item["feature_score"] = feature_score
+            profiles.append(item)
+
+        profiles.sort(key=lambda item: (item.get("feature_score", 0), str(item.get("source", ""))), reverse=True)
+
+        return {
+            "dataset_name": dataset_name,
+            "timestamp": os.path.basename(run_dir),
+            "graph_file": os.path.basename(graph_path),
+            "count": len(profiles),
+            "profiles": profiles[:safe_limit],
+        }
+    except HTTPException:
+        raise
+    except Exception as e:
+        import traceback
+        error_detail = f"读取源画像失败: {str(e)}\n{traceback.format_exc()}"
+        raise HTTPException(status_code=500, detail=error_detail)
+
+
 # 静态文件服务（前端页面）
 frontend_dir = os.path.join(os.path.dirname(__file__), "frontend")
 if os.path.exists(frontend_dir):
@@ -623,7 +794,7 @@ from datetime import datetime
 
 # 导入 corpus 管理模块
 from corpus_saving import (
-    list_corpus_names, check_corpus, save_corpus, delete_corpus
+    list_corpus_items, check_corpus, save_corpus, delete_corpus
 )
 
 
@@ -813,7 +984,7 @@ async def delete_prompt_api(request: DeletePromptRequest):
 async def list_corpus_api():
     """列出所有可用的corpus名称"""
     try:
-        corpus_names = list_corpus_names()
+        corpus_names = list_corpus_items()["corpus_names"]
         return {"corpus_names": corpus_names}
     except Exception as e:
         import traceback
@@ -920,7 +1091,7 @@ async def tune_prompt_mixed_api(request: TunePromptMixedRequest):
     """
     try:
         # 验证 dataset_name 是否在 corpus 列表中
-        available_corpus_names = list_corpus_names()
+        available_corpus_names = list_corpus_items()["corpus_names"]
         if request.dataset_name not in available_corpus_names:
             raise HTTPException(
                 status_code=400,

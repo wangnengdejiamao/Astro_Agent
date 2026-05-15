@@ -4,6 +4,16 @@
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1.0" />
 <title>Astro_Agent · 控制台</title>
+<!-- MathJax for in-browser LaTeX math rendering inside the paper viewer -->
+<script>
+  window.MathJax = {
+    tex: { inlineMath: [['$', '$'], ['\\(', '\\)']],
+           displayMath: [['$$', '$$'], ['\\[', '\\]']],
+           processEscapes: true },
+    options: { skipHtmlTags: ['script','noscript','style','textarea','pre'] }
+  };
+</script>
+<script defer src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
 <style>
   :root {
     --mint: #12CCB9;
@@ -11,13 +21,16 @@
     --ink: #2F3A45;
     --gray: #ECEFF3;
     --red: #FF6B6B;
+    --amber: #F6A609;
+    --blue: #3C82F6;
+    --bg: #F7F9FB;
   }
   * { box-sizing: border-box; }
   body {
     margin: 0;
     font-family: 'Inter', 'Helvetica Neue', 'Source Han Sans SC', sans-serif;
     color: var(--ink);
-    background: #FFFFFF;
+    background: var(--bg);
   }
   header {
     padding: 22px 36px;
@@ -25,6 +38,7 @@
     display: flex;
     align-items: center;
     gap: 16px;
+    background: #fff;
   }
   .bar { width: 6px; height: 32px; background: var(--mint); border-radius: 3px; }
   h1 { margin: 0; font-size: 22px; font-weight: 800; }
@@ -44,7 +58,7 @@
     display: flex; gap: 4px;
     padding: 0 36px;
     border-bottom: 1px solid var(--gray);
-    background: #fafbfc;
+    background: #fff;
   }
   nav button {
     background: transparent; border: 0; padding: 14px 18px;
@@ -53,7 +67,7 @@
   }
   nav button.active { color: var(--mint); border-bottom-color: var(--mint); font-weight: 700; }
 
-  main { padding: 28px 36px; max-width: 1200px; }
+  main { padding: 28px 36px 40px; max-width: 1440px; }
   .panel { display: none; }
   .panel.active { display: block; }
 
@@ -84,7 +98,7 @@
     font-size: 12px; max-height: 480px; overflow: auto; white-space: pre-wrap; word-break: break-all;
   }
   .card {
-    border: 1px solid var(--gray); border-radius: 12px; padding: 18px;
+    border: 1px solid var(--gray); border-radius: 8px; padding: 18px;
     margin-bottom: 18px; background: #fff;
   }
   .card h2 {
@@ -100,7 +114,354 @@
     display: inline-block; padding: 2px 10px; border-radius: 999px;
     background: var(--mint-soft); color: var(--mint); font-size: 11px; font-weight: 700;
   }
+  .workflow-layout {
+    display: grid;
+    grid-template-columns: 330px minmax(0, 1fr);
+    gap: 16px;
+    margin-top: 14px;
+  }
+  .workflow-pane {
+    border: 1px solid var(--gray);
+    border-radius: 8px;
+    background: #fff;
+    min-height: 260px;
+    overflow: hidden;
+  }
+  .workflow-pane h3 {
+    margin: 0;
+    padding: 12px 14px;
+    font-size: 13px;
+    border-bottom: 1px solid var(--gray);
+    background: #fafbfc;
+  }
+  .workflow-pane .pane-body { padding: 12px 14px; }
+  .step-list { display: flex; flex-direction: column; gap: 8px; }
+  .step-item {
+    border: 1px solid var(--gray);
+    border-radius: 8px;
+    padding: 10px 12px;
+    cursor: pointer;
+    background: #fff;
+  }
+  .step-item.active { border-color: var(--mint); box-shadow: 0 0 0 1px var(--mint-soft) inset; }
+  .step-head { display: flex; justify-content: space-between; gap: 10px; align-items: center; }
+  .step-title { font-size: 13px; font-weight: 700; }
+  .step-sub { margin-top: 4px; font-size: 12px; color: #6b7785; line-height: 1.45; }
+  .status {
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 999px;
+    padding: 2px 8px;
+    white-space: nowrap;
+    background: #eef2f6;
+    color: #51606f;
+  }
+  .status.completed { background: #e7fbf6; color: #0c8f7b; }
+  .status.warning { background: #fff4db; color: #9a6a00; }
+  .status.error { background: #ffe5e5; color: #b12a2a; }
+  .status.skipped { background: #edf2f8; color: #607082; }
+  .status.blueprint { background: #eaf2ff; color: #2e66d0; }
+  .status.pending { background: #f1f3f5; color: #697887; }
+  .status.running { background: #e8f7ff; color: #1d6fa5; }
+  .summary-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 12px;
+    margin-top: 12px;
+  }
+  .summary-card {
+    border: 1px solid var(--gray);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: #fff;
+    min-height: 66px;
+  }
+  .summary-label {
+    font-size: 11px;
+    color: #6b7785;
+    margin-bottom: 6px;
+  }
+  .summary-value {
+    font-size: 14px;
+    font-weight: 800;
+    line-height: 1.35;
+    color: var(--ink);
+    word-break: break-word;
+  }
+  .summary-value.warning { color: #9a6a00; }
+  .summary-value.error { color: #b12a2a; }
+  .summary-value.ok { color: #0c8f7b; }
+  .learning-panel {
+    margin-top: 12px;
+    border: 1px solid var(--gray);
+    border-radius: 8px;
+    background: #fff;
+    overflow: hidden;
+  }
+  .learning-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--gray);
+    background: #fafbfc;
+  }
+  .learning-head h3 {
+    margin: 0;
+    font-size: 13px;
+  }
+  .learning-body {
+    padding: 12px 14px;
+    display: grid;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 10px;
+  }
+  .learning-stage {
+    border: 1px solid var(--gray);
+    border-radius: 8px;
+    padding: 10px;
+    min-height: 86px;
+    background: #fff;
+  }
+  .learning-stage strong {
+    display: block;
+    font-size: 12px;
+    margin-bottom: 6px;
+  }
+  .learning-stage p {
+    margin: 6px 0 0;
+    color: #6b7785;
+    font-size: 11px;
+    line-height: 1.45;
+  }
+  .learning-detail {
+    padding: 0 14px 14px;
+  }
+  .kv-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+  }
+  .kv-card {
+    border: 1px solid var(--gray);
+    border-radius: 8px;
+    padding: 10px 12px;
+    background: #fff;
+  }
+  .kv-card .k { font-size: 11px; color: #6b7785; margin-bottom: 6px; text-transform: uppercase; letter-spacing: 0; }
+  .kv-card pre, .detail-pre, .out pre {
+    margin: 0;
+    font-family: 'JetBrains Mono', Consolas, monospace;
+    font-size: 12px;
+    line-height: 1.45;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .detail-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: flex-start;
+    margin-bottom: 10px;
+  }
+  .detail-title { font-size: 18px; font-weight: 800; margin: 0; }
+  .detail-meta { margin-top: 4px; color: #6b7785; font-size: 12px; line-height: 1.45; }
+  .detail-section { margin-top: 12px; }
+  .detail-section h4 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    color: #41505f;
+    text-transform: uppercase;
+    letter-spacing: 0;
+  }
+  .pill-row { display: flex; flex-wrap: wrap; gap: 8px; }
+  .mini-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 11px;
+    font-weight: 700;
+    border-radius: 999px;
+    padding: 4px 10px;
+    background: #f2f5f8;
+    color: #51606f;
+  }
+  .artifact-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 4px 8px;
+    border-radius: 8px;
+    border: 1px solid var(--gray);
+    background: #fff;
+    color: var(--ink);
+    text-decoration: none;
+    font-size: 12px;
+  }
+  .artifact-link:hover { border-color: var(--mint); color: var(--mint); }
+  .trace-empty {
+    padding: 18px;
+    border: 1px dashed var(--gray);
+    border-radius: 8px;
+    color: #6b7785;
+    font-size: 13px;
+    background: #fafbfc;
+  }
+  @media (max-width: 900px) {
+    header { align-items: flex-start; flex-wrap: wrap; padding: 18px 18px; }
+    .health { margin-left: 0; width: 100%; flex-wrap: wrap; }
+    nav { padding: 0 18px; overflow-x: auto; }
+    main { padding: 18px; }
+    .workflow-layout { grid-template-columns: 1fr; }
+    .summary-grid { grid-template-columns: 1fr 1fr; }
+    .learning-body { grid-template-columns: 1fr 1fr; }
+    .kv-grid { grid-template-columns: 1fr; }
+  }
+  @media (max-width: 560px) {
+    .summary-grid { grid-template-columns: 1fr; }
+    .learning-body { grid-template-columns: 1fr; }
+  }
   footer { padding: 14px 36px; color: #8a96a3; font-size: 12px; border-top: 1px solid var(--gray); }
+
+  /* ===== Paper viewer (Round-4 frontend overhaul) ===== */
+  .paper-card { padding: 18px 20px 24px; }
+  .paper-toolbar {
+    display: flex; justify-content: space-between; align-items: center;
+    flex-wrap: wrap; gap: 12px; padding-bottom: 10px;
+    border-bottom: 1px solid var(--gray); margin-bottom: 14px;
+  }
+  .paper-toolbar-left, .paper-toolbar-right {
+    display: flex; align-items: center; gap: 8px;
+  }
+  .paper-toolbar label { margin: 0; }
+  .paper-meta { color: #6b7785; font-size: 12px; margin-bottom: 10px; }
+  .paper-grid {
+    display: grid;
+    grid-template-columns: 220px minmax(0, 1fr) 320px;
+    gap: 18px;
+    align-items: start;
+  }
+  @media (max-width: 1200px) {
+    .paper-grid { grid-template-columns: 200px 1fr; }
+    .paper-side { grid-column: 1 / -1; }
+  }
+  .paper-sections, .paper-side {
+    border: 1px solid var(--gray); border-radius: 10px;
+    padding: 12px; background: #fff; max-height: 78vh; overflow-y: auto;
+  }
+  .paper-content {
+    border: 1px solid var(--gray); border-radius: 10px;
+    padding: 22px 28px; background: #fff;
+    min-height: 60vh; max-height: 78vh; overflow-y: auto;
+    line-height: 1.7; font-size: 14.5px; color: #1f2933;
+  }
+  .paper-content h1, .paper-content h2 { color: var(--ink); margin-top: 0; }
+  .paper-content h3 { color: var(--mint-dark, #079e91); margin: 16px 0 8px; }
+  .paper-content p { margin: 8px 0 12px; }
+  .paper-content code { background: #f3f5f7; padding: 1px 5px; border-radius: 4px; font-size: 12.5px; }
+  .paper-content blockquote {
+    border-left: 3px solid var(--mint); padding: 4px 12px; margin: 10px 0;
+    color: #4a5563; background: var(--mint-soft);
+  }
+  .paper-content table {
+    border-collapse: collapse; width: 100%; margin: 10px 0; font-size: 12.5px;
+  }
+  .paper-content table th, .paper-content table td {
+    border: 1px solid #dde2e7; padding: 5px 8px; text-align: left;
+  }
+  .paper-content table th { background: #f7f9fb; font-weight: 700; }
+  .paper-content .placeholder { color: #94a3b1; font-style: italic; padding: 18px; }
+  .paper-content .tex-citep {
+    color: var(--blue); font-weight: 600; background: #eaf2ff;
+    padding: 0 4px; border-radius: 3px; cursor: help;
+  }
+
+  .paper-section-head {
+    font-size: 11px; text-transform: uppercase; font-weight: 700;
+    letter-spacing: 0.06em; color: #94a3b1; margin-bottom: 6px;
+  }
+  #paper-section-list, #paper-qc-list { list-style: none; padding: 0; margin: 0; }
+  #paper-section-list li {
+    padding: 7px 10px; border-radius: 6px; cursor: pointer;
+    font-size: 13.5px; color: #2f3a45; margin-bottom: 2px;
+  }
+  #paper-section-list li:hover { background: var(--mint-soft); }
+  #paper-section-list li.active {
+    background: var(--mint); color: white; font-weight: 700;
+  }
+  #paper-section-list li .word-count {
+    font-size: 11px; color: inherit; opacity: 0.7; margin-left: 6px;
+  }
+  .qc-list li {
+    font-size: 12px; padding: 4px 6px; border-radius: 4px; margin-bottom: 2px;
+    display: flex; gap: 6px; align-items: flex-start;
+  }
+  .qc-pass { background: #e8f9f1; color: #0a7a3d; }
+  .qc-warn { background: #fff8e2; color: #946a00; }
+  .qc-fail { background: #fde8e8; color: #a82020; }
+  .qc-list .qc-id { font-weight: 600; }
+  .qc-list .qc-reason { color: inherit; opacity: 0.8; flex: 1; }
+
+  .paper-figure {
+    margin-bottom: 14px; border: 1px solid var(--gray); border-radius: 8px;
+    padding: 8px; background: #fafbfc;
+  }
+  .paper-figure img { width: 100%; height: auto; border-radius: 4px; }
+  .paper-figure .cap { font-size: 11.5px; color: #4a5563; padding: 4px 2px 0; }
+  .paper-figure .name { font-size: 11px; color: #94a3b1; font-weight: 600; padding-top: 2px; }
+
+  .headline {
+    display: flex; justify-content: space-between; gap: 6px;
+    padding: 4px 0; border-bottom: 1px dashed var(--gray); font-size: 12.5px;
+  }
+  .headline .param { color: #4a5563; flex: 1; }
+  .headline .val { font-weight: 600; color: var(--ink); }
+  .headline .kind { font-size: 10px; color: #94a3b1; }
+
+  .rewrite-box {
+    border: 1px dashed var(--mint); border-radius: 8px; padding: 10px;
+    background: #f7fdfc;
+  }
+  .pill.qc-pass-pill { background: #d8f5e6; color: #0a7a3d; }
+  .pill.qc-warn-pill { background: #fff1c0; color: #946a00; }
+  .pill.qc-fail-pill { background: #fbd9d9; color: #a82020; }
+  /* White-dwarf domain badges + ablation + prompt lab styles (PR4) */
+  .wd-badges-row { display: flex; flex-wrap: wrap; gap: 6px; margin: 4px 0 0; }
+  .wd-badge {
+    display: inline-flex; align-items: center; gap: 4px;
+    padding: 3px 8px; border-radius: 12px; font-size: 11.5px;
+    cursor: pointer; border: 1px solid transparent;
+  }
+  .wd-badge.pass { background: #e6f6ee; color: #1a7340; border-color: #b8e0c8; }
+  .wd-badge.warn { background: #fff4d8; color: #8c6300; border-color: #f0d792; }
+  .wd-badge.fail { background: #fde2e2; color: #9a1f1f; border-color: #f0a8a8; }
+  .wd-badge.empty { background: #f3f5f7; color: #6b7785; border-color: #d8dfe5; }
+  .wd-badge-detail {
+    background: #f7f9fb; border: 1px solid #d8dfe5; border-radius: 6px;
+    padding: 8px; margin-top: 4px; font-size: 11.5px;
+  }
+  #ablation-heatmap table { border-collapse: collapse; }
+  #ablation-heatmap th, #ablation-heatmap td {
+    border: 1px solid #d8dfe5; padding: 4px 8px; font-size: 11.5px;
+    text-align: center; min-width: 70px;
+  }
+  #ablation-heatmap th { background: #f7f9fb; }
+  #ablation-heatmap td.cell { cursor: pointer; }
+  #ablation-heatmap td.cell:hover { outline: 2px solid var(--mint-dark, #079e91); }
+  .ablation-bar {
+    background: linear-gradient(90deg, #5dc8b7, #3996ff); height: 14px;
+    display: inline-block; vertical-align: middle; border-radius: 3px;
+  }
+  #promptlab-list li {
+    padding: 6px 10px; cursor: pointer; border-bottom: 1px solid #eef1f4;
+    font-size: 12.5px;
+  }
+  #promptlab-list li:hover { background: var(--mint-soft, #e8f6f3); }
+  #promptlab-list li.active { background: var(--mint-soft, #e8f6f3); font-weight: 600; }
+  #promptlab-list li .ovr-flag { color: #079e91; font-size: 10px; margin-left: 4px; }
+  .reviewer-score-row { display:flex; gap:6px; flex-wrap:wrap; margin: 4px 0; }
+  .reviewer-score-row .pill { font-size: 11px; }
 </style>
 </head>
 <body>
@@ -118,7 +479,10 @@
 </header>
 
 <nav id="nav">
-  <button data-tab="agent" class="active">Agent 全流程</button>
+  <button data-tab="paper" class="active">📄 论文阅读</button>
+  <button data-tab="ablation">🧪 消融实验</button>
+  <button data-tab="promptlab">🔬 Prompt Lab</button>
+  <button data-tab="agent">Agent 全流程</button>
   <button data-tab="writing">写作 Agent</button>
   <button data-tab="rag">RAG 检索</button>
   <button data-tab="kg">知识图谱</button>
@@ -131,20 +495,185 @@
 
 <main>
 
+<!-- PAPER VIEWER (default tab) -->
+<section class="panel active" data-panel="paper">
+  <div class="card paper-card">
+    <div class="paper-toolbar">
+      <div class="paper-toolbar-left">
+        <label>Run</label>
+        <select id="paper-run-select" style="min-width:340px"></select>
+        <button class="ghost" onclick="loadPaper()">⟳ 刷新</button>
+      </div>
+      <div class="paper-toolbar-right">
+        <span class="pill" id="paper-qc-pill">QC 待加载</span>
+        <span class="pill" id="paper-class-pill"></span>
+        <a class="ghost" id="paper-pdf-link" target="_blank" style="display:none">📥 PDF</a>
+        <a class="ghost" id="paper-tex-link" target="_blank" style="display:none">📄 paper.tex</a>
+      </div>
+    </div>
+
+    <h2 id="paper-title" style="margin:6px 0 12px">选择一个 run …</h2>
+    <div class="paper-meta" id="paper-meta"></div>
+
+    <div class="paper-grid">
+      <!-- left: section navigation -->
+      <aside class="paper-sections">
+        <div class="paper-section-head">章节</div>
+        <ul id="paper-section-list"></ul>
+        <div class="paper-section-head" style="margin-top:18px">QC 状态</div>
+        <ul id="paper-qc-list" class="qc-list"></ul>
+      </aside>
+
+      <!-- middle: rendered section content -->
+      <main class="paper-content" id="paper-content">
+        <div class="placeholder">从左侧选择一个章节查看内容</div>
+      </main>
+
+      <!-- right: figures + headlines + rewrite controls -->
+      <aside class="paper-side">
+        <div class="paper-section-head">白矮星领域校验 <span class="pill" id="wd-badges-count" style="font-size:10px"></span></div>
+        <div id="paper-wd-badges" class="wd-badges-row"></div>
+
+        <div class="paper-section-head" style="margin-top:18px">审稿人 (Reviewer)</div>
+        <div id="paper-reviewer">
+          <button class="ghost" id="reviewer-run-btn" onclick="runReviewerPass()">⚖ 让 Claude 审稿一次</button>
+          <div id="reviewer-result" style="font-size:12.5px;margin-top:6px;"></div>
+        </div>
+
+        <div class="paper-section-head" style="margin-top:18px">关键数字</div>
+        <div id="paper-headlines"></div>
+
+        <div class="paper-section-head" style="margin-top:18px">图</div>
+        <div id="paper-figures"></div>
+
+        <div class="paper-section-head" style="margin-top:18px">新颖性 / 对照</div>
+        <div id="paper-novelty"></div>
+
+        <div class="paper-section-head" style="margin-top:18px">章节重写</div>
+        <div class="rewrite-box">
+          <textarea id="rewrite-advice" rows="3" placeholder="（可选）针对当前章节的额外重写指引；留空使用系统默认指引"></textarea>
+          <div style="display:flex;gap:8px;align-items:center;margin-top:8px;">
+            <label style="display:flex;gap:4px;align-items:center;font-size:12px;">
+              <input type="checkbox" id="rewrite-llm" checked> use_llm
+            </label>
+            <select id="rewrite-provider" style="flex:1">
+              <option value="">(default)</option>
+              <option value="deepseek">deepseek</option>
+              <option value="kimi">kimi</option>
+              <option value="fox">fox</option>
+            </select>
+          </div>
+          <button class="primary" style="width:100%;margin-top:8px" onclick="submitRewrite()">⟳ 重写当前章节</button>
+          <div id="rewrite-status" style="font-size:12px;color:#6b7785;margin-top:6px"></div>
+        </div>
+      </aside>
+    </div>
+  </div>
+</section>
+
+<!-- ABLATION DASHBOARD -->
+<section class="panel" data-panel="ablation">
+  <div class="card">
+    <h2>🧪 消融实验 <span class="pill">ablation</span></h2>
+    <div class="hint">14 configs × 2 gold targets。点 cell 跑/查看；查看 CSV 行；leaderboard。</div>
+    <div style="display:flex;gap:8px;margin:8px 0;">
+      <button class="ghost" onclick="loadAblation()">⟳ 刷新</button>
+      <button class="ghost" onclick="runAblationRow('baseline', 'UPK13c2', true)">🧪 干跑一行 (baseline · UPK13c2)</button>
+      <span id="ablation-status" style="font-size:12px;color:#6b7785;align-self:center"></span>
+    </div>
+    <h3 style="margin-top:14px">实验矩阵 (composite score 热力图)</h3>
+    <div id="ablation-heatmap" style="overflow-x:auto"></div>
+    <h3 style="margin-top:14px">Leave-one-out (ΔComposite vs baseline)</h3>
+    <div id="ablation-loo-chart"></div>
+    <h3 style="margin-top:14px">Leaderboard (top 10 by composite)</h3>
+    <div id="ablation-leaderboard"></div>
+    <h3 style="margin-top:14px">原始 CSV 行</h3>
+    <div id="ablation-csv-rows" style="font-size:11.5px;font-family:ui-monospace,monospace"></div>
+  </div>
+</section>
+
+<!-- PROMPT LAB -->
+<section class="panel" data-panel="promptlab">
+  <div class="card">
+    <h2>🔬 Prompt Lab <span class="pill">overrides</span></h2>
+    <div class="hint">每个 system / section prompt 可在线编辑覆写；保存到 <code>analysis_agent/prompts/overrides/&lt;name&gt;.txt</code>，运行时优先加载。</div>
+    <div style="display:flex;gap:12px;margin-top:8px;">
+      <div style="width:260px;">
+        <h3>Prompt list</h3>
+        <ul id="promptlab-list" style="list-style:none;padding:0;margin:0;max-height:520px;overflow:auto"></ul>
+      </div>
+      <div style="flex:1">
+        <h3 id="promptlab-name">选择左侧一个 prompt</h3>
+        <textarea id="promptlab-edit" rows="22" style="width:100%;font-family:ui-monospace,monospace;font-size:12px"></textarea>
+        <div style="display:flex;gap:8px;margin-top:8px;">
+          <button class="primary" onclick="promptSave(false)">💾 保存覆写</button>
+          <button class="ghost" onclick="promptSave(true)">🗑 删除覆写 (回退默认)</button>
+          <span id="promptlab-save-status" style="font-size:12px;color:#6b7785;align-self:center"></span>
+        </div>
+      </div>
+    </div>
+    <h3 style="margin-top:18px">Prompt 实验记录 (_prompt_experiments.sqlite)</h3>
+    <div id="promptlab-exp-summary" style="font-size:12.5px"></div>
+  </div>
+</section>
+
 <!-- AGENT -->
-<section class="panel active" data-panel="agent">
+<section class="panel" data-panel="agent">
   <div class="card">
     <h2>跑一次 Chief Investigator <span class="pill">LangGraph</span></h2>
-    <div class="hint">输入目标名（或同时给 RA/Dec）。`--execute` 会真实下载与拟合；默认 dry-run。</div>
+    <div class="hint">输入目标名（或同时给 RA/Dec）。默认只演练流程，不下载大数据；打开真实运行后才会调用外部服务。</div>
     <div class="row">
-      <div class="field"><label>Target</label><input id="ag-target" value="Gaia DR3 865415642195374464" /></div>
-      <div class="field"><label>RA (deg)</label><input id="ag-ra" type="number" step="any" value="232.3955" /></div>
-      <div class="field"><label>Dec (deg)</label><input id="ag-dec" type="number" step="any" value="29.4672" /></div>
+      <div class="field"><label>Target</label><input id="ag-target" value="ZTF J152934.91+292801.87" /></div>
+      <div class="field"><label>RA (deg)</label><input id="ag-ra" type="number" step="any" value="232.395458" /></div>
+      <div class="field"><label>Dec (deg)</label><input id="ag-dec" type="number" step="any" value="29.467186" /></div>
     </div>
     <div class="row">
-      <label style="flex:1"><input type="checkbox" id="ag-execute" /> --execute (真实跑模块)</label>
-      <label style="flex:1"><input type="checkbox" id="ag-llm" checked /> --use-llm (DeepSeek 写作)</label>
-      <button class="primary" id="ag-run">运行</button>
+      <div class="field" style="flex:3"><label>已有 astro_toolbox 输出目录（可选）</label><input id="ag-astrotool-run" value="/Users/a1/Desktop/desi匹配/DWD_new/astro_output/ZTFJ152934.91+292801.87_full_rerun_20260428_v2" placeholder="/Users/a1/Desktop/.../astro_output/target" /></div>
+    </div>
+    <div class="row">
+      <label style="flex:1"><input type="checkbox" id="ag-execute" /> 真实跑数据模块</label>
+      <label style="flex:1"><input type="checkbox" id="ag-llm" /> 启用 LLM 写作</label>
+      <label style="flex:1"><input type="checkbox" id="ag-simbad" checked /> 跳过 SIMBAD</label>
+      <label style="flex:1"><input type="checkbox" id="ag-kg-report" /> 生成 KG 总览报告</label>
+      <label style="flex:1"><input type="checkbox" id="ag-method-scout" /> 启用方法侦察 LLM</label>
+      <label style="flex:1"><input type="checkbox" id="ag-source-package" /> 构建源研究包</label>
+      <label style="flex:1"><input type="checkbox" id="ag-download-pdfs" /> 下载参考文献 PDF</label>
+      <label style="flex:1"><input type="checkbox" id="ag-claude" /> 允许 Claude Code 任务</label>
+      <div class="field" style="flex:1">
+        <label>Claude 权限模式</label>
+        <select id="ag-claude-mode">
+          <option value="plan">plan</option>
+          <option value="default">default</option>
+          <option value="acceptEdits">acceptEdits</option>
+        </select>
+      </div>
+      <button class="primary" id="ag-run" data-testid="agent-run">运行</button>
+      <button class="ghost" id="ag-blueprint-btn" data-testid="agent-blueprint">查看蓝图</button>
+    </div>
+    <div class="summary-grid" id="ag-summary" data-testid="agent-summary"></div>
+    <div class="learning-panel" id="learning-panel">
+      <div class="learning-head">
+        <h3>自动学习闭环</h3>
+        <span class="status skipped" id="learning-overall">等待运行</span>
+      </div>
+      <div class="learning-body" id="learning-body"></div>
+      <div class="learning-detail" id="learning-detail">
+        <div class="trace-empty">勾选「启用方法侦察 LLM」后，系统会从 RAG/KG 证据提取算法规范；勾选「允许 Claude Code 任务」后，才会委派实现和验证。</div>
+      </div>
+    </div>
+    <div class="workflow-layout">
+      <div class="workflow-pane">
+        <h3>流程步骤</h3>
+        <div class="pane-body">
+          <div id="ag-step-list" class="step-list"></div>
+        </div>
+      </div>
+      <div class="workflow-pane">
+        <h3>步骤详情</h3>
+        <div class="pane-body" id="ag-step-detail">
+          <div class="trace-empty">先加载蓝图或运行一次流程。</div>
+        </div>
+      </div>
     </div>
     <div class="out" id="ag-out">等待运行…</div>
   </div>
@@ -194,13 +723,14 @@
 <!-- KG -->
 <section class="panel" data-panel="kg">
   <div class="card">
-    <h2>知识图谱 <span class="pill">12,740 节点 / 83,782 边</span></h2>
-    <div class="hint">每行一个 query，用 ; 分隔多个查询。返回方法迁移路径。</div>
+    <h2>知识图谱 <span class="pill">10,115 源画像 / 51,206 关系</span></h2>
+    <div class="hint">每行一个 query，用 ; 分隔多个查询。返回方法迁移路径；可打开完整源画像图谱。</div>
     <div class="row">
       <div class="field" style="flex:3"><label>Queries (用 ; 分隔)</label>
         <input id="kg-q" value="SED fitting Bayesian inference parallax cooling age; 6D phase space orbit traceback" /></div>
       <div class="field"><label>Limit</label><input id="kg-k" type="number" value="12" /></div>
       <button class="primary" id="kg-run">检索</button>
+      <button class="ghost" id="kg-visual" type="button">打开图谱可视化</button>
     </div>
     <div class="out" id="kg-out">等待检索…</div>
   </div>
@@ -295,7 +825,22 @@
   <div class="card">
     <h2>历史 Runs</h2>
     <div class="hint">列出 output/analysis_agent/* 目录；点击文件名读取产物 JSON。</div>
-    <button class="ghost" id="runs-refresh">刷新</button>
+    <button class="ghost" id="runs-refresh" data-testid="runs-refresh">刷新</button>
+    <div class="summary-grid" id="runs-summary" data-testid="runs-summary"></div>
+    <div class="workflow-layout">
+      <div class="workflow-pane">
+        <h3>Run 列表</h3>
+        <div class="pane-body">
+          <div id="runs-list" class="step-list"></div>
+        </div>
+      </div>
+      <div class="workflow-pane">
+        <h3>Run Trace</h3>
+        <div class="pane-body" id="runs-detail">
+          <div class="trace-empty">点击某个 run 查看它的完整流程 trace。</div>
+        </div>
+      </div>
+    </div>
     <div class="out" id="runs-out">点击「刷新」加载历史…</div>
   </div>
 </section>
@@ -306,12 +851,423 @@
 
 <script>
 const $ = (id) => document.getElementById(id);
-const api = (path, body) => fetch(path, {
-  method: body ? 'POST' : 'GET',
-  headers: { 'Content-Type': 'application/json' },
-  body: body ? JSON.stringify(body) : undefined,
-}).then(r => r.json());
+const appState = {
+  blueprint: [],
+  workflowTrace: [],
+  selectedStepId: null,
+  selectedRun: null,
+  lastAgentResult: null,
+};
+const API_BASE = location.protocol === 'file:' ? 'http://localhost:8765' : '';
+
+async function api(path, body, init = {}) {
+  const options = {
+    ...init,
+    headers: { ...(init.headers || {}) },
+  };
+  if (body !== undefined) {
+    options.method = options.method || 'POST';
+    if (options.method !== 'GET') {
+      options.headers['Content-Type'] = options.headers['Content-Type'] || 'application/json';
+      options.body = typeof body === 'string' ? body : JSON.stringify(body);
+    }
+  }
+  if (!options.method) options.method = 'GET';
+  const res = await fetch(`${API_BASE}${path}`, options);
+  const text = await res.text();
+  let payload = text;
+  if (text) {
+    try { payload = JSON.parse(text); } catch { payload = text; }
+  } else {
+    payload = null;
+  }
+  if (!res.ok) {
+    const msg = payload && typeof payload === 'object'
+      ? (payload.detail || payload.error || payload.message || `HTTP ${res.status}`)
+      : (payload || `HTTP ${res.status}`);
+    throw new Error(msg);
+  }
+  return payload;
+}
+
 const show = (el, data) => el.textContent = (typeof data === 'string') ? data : JSON.stringify(data, null, 2);
+const clear = (el) => { while (el.firstChild) el.removeChild(el.firstChild); };
+const isObj = (v) => v && typeof v === 'object' && !Array.isArray(v);
+const statusClass = (status) => {
+  const s = String(status || '').toLowerCase();
+  if (s.includes('error')) return 'error';
+  if (s.includes('warn') || s.includes('nonconverged')) return 'warning';
+  if (s.includes('pending')) return 'pending';
+  if (s.includes('running')) return 'running';
+  if (s.includes('skip')) return 'skipped';
+  if (s.includes('blueprint')) return 'blueprint';
+  return 'completed';
+};
+const statusText = (status) => {
+  const cls = statusClass(status);
+  return ({
+    completed: '完成',
+    warning: '警告',
+    error: '报错',
+    skipped: '跳过',
+    blueprint: '蓝图',
+    pending: '待执行',
+    running: '运行中',
+  })[cls] || String(status || '未知');
+};
+const pretty = (v) => {
+  if (typeof v === 'string') return v;
+  if (v === undefined) return '';
+  return JSON.stringify(v, null, 2);
+};
+const renderJsonBlock = (title, value) => {
+  const wrap = document.createElement('div');
+  wrap.className = 'kv-card';
+  const k = document.createElement('div');
+  k.className = 'k';
+  k.textContent = title;
+  const pre = document.createElement('pre');
+  pre.textContent = pretty(value);
+  wrap.appendChild(k);
+  wrap.appendChild(pre);
+  return wrap;
+};
+const renderPills = (items) => {
+  const row = document.createElement('div');
+  row.className = 'pill-row';
+  (items || []).forEach(item => {
+    const pill = document.createElement('span');
+    pill.className = 'mini-pill';
+    pill.textContent = item;
+    row.appendChild(pill);
+  });
+  return row;
+};
+function getStepOutput(trace, stepId, key) {
+  const step = (trace || []).find(s => s.id === stepId);
+  return step && step.outputs ? step.outputs[key] : null;
+}
+function renderTraceSummary(trace, panelPrefix = 'ag') {
+  const root = panelPrefix === 'runs' ? $('runs-summary') : $(`${panelPrefix}-summary`);
+  if (!root) return;
+  clear(root);
+  const steps = trace || [];
+  if (!steps.length) {
+    const empty = document.createElement('div');
+    empty.className = 'summary-card';
+    empty.style.gridColumn = '1 / -1';
+    empty.innerHTML = '<div class="summary-label">流程摘要</div><div class="summary-value">等待 trace</div>';
+    root.appendChild(empty);
+    return;
+  }
+  const counts = steps.reduce((acc, step) => {
+    const cls = statusClass(step.status);
+    acc[cls] = (acc[cls] || 0) + 1;
+    return acc;
+  }, {});
+  const plan = getStepOutput(steps, 'structure_planner', 'analysis_plan') || {};
+  const qa = getStepOutput(steps, 'qa_gate', 'qa') || {};
+  const artifactCount = steps.reduce((n, step) => n + (step.artifacts || []).filter(a => a.exists).length, 0);
+  const problemCount = (counts.warning || 0) + (counts.error || 0);
+  const stepSummary = [
+    [counts.running || 0, '运行中'],
+    [counts.completed || 0, '完成'],
+    [counts.warning || 0, '警告'],
+    [counts.error || 0, '报错'],
+    [counts.skipped || 0, '跳过'],
+    [counts.pending || 0, '待执行'],
+  ].filter(([count]) => count > 0).map(([count, label]) => `${count} ${label}`).join(' · ');
+  const cards = [
+    ['步骤', stepSummary || `${steps.length} 步`, problemCount ? 'warning' : 'ok'],
+    ['科学路线', plan.route || '等待结构规划', plan.route === 'insufficient_data' ? 'warning' : ''],
+    ['QA 门禁', qa.apj_gate || '等待 QA', qa.human_review_required ? 'warning' : (qa.apj_gate ? 'ok' : '')],
+    ['产物', `${artifactCount} 个文件`, artifactCount ? 'ok' : ''],
+  ];
+  cards.forEach(([label, value, tone]) => {
+    const card = document.createElement('div');
+    card.className = 'summary-card';
+    const l = document.createElement('div');
+    l.className = 'summary-label';
+    l.textContent = label;
+    const v = document.createElement('div');
+    v.className = `summary-value ${tone || ''}`.trim();
+    v.textContent = value;
+    card.appendChild(l);
+    card.appendChild(v);
+    root.appendChild(card);
+  });
+}
+
+function stageStatus(ok, skipped, warning = false) {
+  if (ok) return 'completed';
+  if (warning) return 'warning';
+  if (skipped) return 'skipped';
+  return 'pending';
+}
+
+function renderLearningPanel(result) {
+  const body = $('learning-body');
+  const detail = $('learning-detail');
+  const overall = $('learning-overall');
+  if (!body || !detail || !overall) return;
+  clear(body);
+  clear(detail);
+
+  if (!result) {
+    overall.className = 'status skipped';
+    overall.textContent = '等待运行';
+    detail.innerHTML = '<div class="trace-empty">勾选「启用方法侦察 LLM」后，系统会从 RAG/KG 证据提取算法规范；勾选「允许 Claude Code 任务」后，才会委派实现和验证。</div>';
+    return;
+  }
+
+  const scout = result.method_scout || {};
+  const algorithm = scout.algorithm_spec || {};
+  const gap = result.toolbox_gap || scout.toolbox_gap || {};
+  const claude = result.claude_code || {};
+  const registration = result.dynamic_skill_registration || claude.dynamic_skill_registration || {};
+  const evidence = scout.method_evidence || algorithm.evidence || {};
+  const evidenceCount = (evidence.rag_refs || []).length + (evidence.kg_refs || []).length;
+
+  const stages = [
+    {
+      title: '1. 论文证据',
+      status: stageStatus(evidenceCount > 0, !scout.status),
+      value: evidenceCount ? `${evidenceCount} 条 RAG/KG 证据` : '等待 method_scout',
+      desc: '从本地 RAG 和知识图谱收集文献片段、bibcode、方法关系。',
+    },
+    {
+      title: '2. 算法规范',
+      status: stageStatus(algorithm.status === 'llm_extracted', !algorithm.status, algorithm.status === 'evidence_summary_only'),
+      value: algorithm.status || '等待提取',
+      desc: algorithm.method_name || '把论文文字整理成输入、输出、步骤、约束、验证方案。',
+    },
+    {
+      title: '3. 工具缺口',
+      status: stageStatus(gap.status === 'ready_for_tool_write', !gap.status, gap.status === 'draft_needs_algorithm_extraction'),
+      value: gap.target_module || gap.status || '等待生成',
+      desc: '把算法规范变成 astro_toolbox 的开发任务和接口契约。',
+    },
+    {
+      title: '4. Claude 实现',
+      status: stageStatus(claude.status && !String(claude.status).includes('skipped'), claude.status === 'skipped' || !claude.status),
+      value: claude.status || '未委派',
+      desc: '只有勾选 Claude Code 并给权限后，才会实现工具并跑验证。',
+    },
+    {
+      title: '5. Skill 注册',
+      status: stageStatus(registration.status === 'registered', !registration.status || registration.status === 'skipped', registration.reason === 'validation_not_confirmed'),
+      value: registration.status || '等待验证',
+      desc: registration.reason || '验证通过后写入 .claude/agents 和 skills/registry.json。',
+    },
+  ];
+
+  const hasReadyGap = gap.status === 'ready_for_tool_write';
+  const registered = registration.status === 'registered';
+  const blocked = gap.status === 'draft_needs_algorithm_extraction' || registration.reason === 'validation_not_confirmed';
+  overall.className = `status ${registered ? 'completed' : blocked ? 'warning' : hasReadyGap ? 'running' : 'skipped'}`;
+  overall.textContent = registered ? '已注册' : blocked ? '需要补规范/验证' : hasReadyGap ? '可委派实现' : '观察中';
+
+  stages.forEach(stage => {
+    const card = document.createElement('div');
+    card.className = 'learning-stage';
+    const title = document.createElement('strong');
+    title.textContent = stage.title;
+    const badge = document.createElement('span');
+    badge.className = `status ${stage.status}`;
+    badge.textContent = statusText(stage.status);
+    const value = document.createElement('p');
+    value.textContent = stage.value;
+    const desc = document.createElement('p');
+    desc.textContent = stage.desc;
+    card.appendChild(title);
+    card.appendChild(badge);
+    card.appendChild(value);
+    card.appendChild(desc);
+    body.appendChild(card);
+  });
+
+  const grid = document.createElement('div');
+  grid.className = 'kv-grid';
+  grid.appendChild(renderJsonBlock('算法规范 algorithm_spec', algorithm));
+  grid.appendChild(renderJsonBlock('工具箱缺口 toolbox_gap', gap));
+  grid.appendChild(renderJsonBlock('Claude / 注册结果', {
+    claude_status: claude.status,
+    queued_actions: claude.queued_actions,
+    dynamic_skill_registration: registration,
+  }));
+  grid.appendChild(renderJsonBlock('证据来源 method_evidence', {
+    reference_bibcodes: evidence.reference_bibcodes,
+    rag_refs: (evidence.rag_refs || []).slice(0, 3),
+    kg_refs: (evidence.kg_refs || []).slice(0, 3),
+  }));
+  detail.appendChild(grid);
+}
+function renderWorkflow(trace, panelPrefix = 'ag') {
+  const listRoot = panelPrefix === 'runs' ? $('runs-list') : $(`${panelPrefix}-step-list`);
+  const detailRoot = panelPrefix === 'runs' ? $('runs-detail') : $(`${panelPrefix}-step-detail`);
+  if (!listRoot || !detailRoot) return;
+  clear(listRoot);
+  clear(detailRoot);
+  const steps = trace || [];
+  renderTraceSummary(steps, panelPrefix);
+  if (!steps.length) {
+    detailRoot.innerHTML = '<div class="trace-empty">没有可显示的流程步骤。</div>';
+    return;
+  }
+  if (!appState.selectedStepId || !steps.some(s => s.id === appState.selectedStepId)) {
+    appState.selectedStepId = steps[0].id;
+  }
+  steps.forEach((step, idx) => {
+    const item = document.createElement('div');
+    item.className = 'step-item' + (step.id === appState.selectedStepId ? ' active' : '');
+    const head = document.createElement('div');
+    head.className = 'step-head';
+    const title = document.createElement('div');
+    title.className = 'step-title';
+    title.textContent = `${idx + 1}. ${step.label || step.id}`;
+    const badge = document.createElement('span');
+    badge.className = `status ${statusClass(step.status)}`;
+    badge.textContent = statusText(step.status);
+    head.appendChild(title);
+    head.appendChild(badge);
+    const sub = document.createElement('div');
+    sub.className = 'step-sub';
+    sub.textContent = step.purpose || '';
+    item.appendChild(head);
+    item.appendChild(sub);
+    item.onclick = () => {
+      appState.selectedStepId = step.id;
+      renderWorkflow(trace, panelPrefix);
+    };
+    listRoot.appendChild(item);
+  });
+  const selected = steps.find(s => s.id === appState.selectedStepId) || steps[0];
+  renderWorkflowDetail(selected, detailRoot);
+}
+
+function renderWorkflowDetail(step, root) {
+  clear(root);
+  if (!step) {
+    root.innerHTML = '<div class="trace-empty">请选择一个步骤。</div>';
+    return;
+  }
+  const head = document.createElement('div');
+  head.className = 'detail-head';
+  const left = document.createElement('div');
+  const title = document.createElement('div');
+  title.className = 'detail-title';
+  title.textContent = step.label || step.id;
+  const meta = document.createElement('div');
+  meta.className = 'detail-meta';
+  meta.textContent = `${step.owner || 'unknown'} · ${step.node || step.id}`;
+  left.appendChild(title);
+  left.appendChild(meta);
+  const badge = document.createElement('span');
+  badge.className = `status ${statusClass(step.status)}`;
+  badge.textContent = statusText(step.status);
+  head.appendChild(left);
+  head.appendChild(badge);
+  root.appendChild(head);
+
+  const purpose = document.createElement('div');
+  purpose.className = 'detail-meta';
+  purpose.textContent = step.purpose || '';
+  root.appendChild(purpose);
+
+  const checks = document.createElement('div');
+  checks.className = 'detail-section';
+  const checksTitle = document.createElement('h4');
+  checksTitle.textContent = '科学检查';
+  checks.appendChild(checksTitle);
+  checks.appendChild(renderPills(step.science_checks || []));
+  root.appendChild(checks);
+
+  const grid = document.createElement('div');
+  grid.className = 'kv-grid detail-section';
+  grid.appendChild(renderJsonBlock('输入', step.inputs || {}));
+  grid.appendChild(renderJsonBlock('输出', step.outputs || {}));
+  root.appendChild(grid);
+
+  const flow = document.createElement('div');
+  flow.className = 'detail-section';
+  const flowTitle = document.createElement('h4');
+  flowTitle.textContent = '数据怎么穿';
+  flow.appendChild(flowTitle);
+  flow.appendChild(renderJsonBlock('读取 / 写入 / 文件', step.data_flow || {}));
+  root.appendChild(flow);
+
+  const artifactWrap = document.createElement('div');
+  artifactWrap.className = 'detail-section';
+  const artifactTitle = document.createElement('h4');
+  artifactTitle.textContent = '产物';
+  artifactWrap.appendChild(artifactTitle);
+  const artifacts = step.artifacts || [];
+  if (!artifacts.length) {
+    const empty = document.createElement('div');
+    empty.className = 'detail-meta';
+    empty.textContent = '没有对应的产物文件。';
+    artifactWrap.appendChild(empty);
+  } else {
+    const row = document.createElement('div');
+    row.className = 'pill-row';
+    artifacts.forEach(item => {
+      const link = document.createElement('a');
+      link.className = 'artifact-link';
+      link.href = item.url || '#';
+      link.target = '_blank';
+      link.rel = 'noreferrer';
+      link.textContent = item.name + (item.exists ? ` (${item.size_bytes || 0}B)` : ' (missing)');
+      row.appendChild(link);
+    });
+    artifactWrap.appendChild(row);
+  }
+  root.appendChild(artifactWrap);
+
+  const issues = document.createElement('div');
+  issues.className = 'detail-section';
+  const issuesTitle = document.createElement('h4');
+  issuesTitle.textContent = '报错 / 风险';
+  issues.appendChild(issuesTitle);
+  const issueList = step.issues || [];
+  if (!issueList.length) {
+    const ok = document.createElement('div');
+    ok.className = 'detail-meta';
+    ok.textContent = '当前步骤没有额外警告。';
+    issues.appendChild(ok);
+  } else {
+    const ul = document.createElement('ul');
+    ul.style.margin = '0';
+    ul.style.paddingLeft = '18px';
+    ul.style.color = '#8b3b18';
+    issueList.forEach(text => {
+      const li = document.createElement('li');
+      li.textContent = text;
+      ul.appendChild(li);
+    });
+    issues.appendChild(ul);
+  }
+  root.appendChild(issues);
+}
+
+async function loadBlueprint() {
+  try {
+    const r = await api('/api/agent/blueprint');
+    appState.blueprint = r.steps || [];
+    renderWorkflow(appState.blueprint, 'ag');
+  } catch (e) {
+    const detailRoot = $('ag-step-detail');
+    detailRoot.innerHTML = `<div class="trace-empty">蓝图加载失败：${String(e)}</div>`;
+  }
+}
+
+async function loadRunTrace(runName) {
+  const r = await api(`/api/runs/${encodeURIComponent(runName)}/trace`);
+  appState.selectedRun = runName;
+  appState.workflowTrace = r.workflow_trace || [];
+  appState.selectedStepId = appState.workflowTrace[0] && appState.workflowTrace[0].id;
+  renderWorkflow(appState.workflowTrace, 'runs');
+  return r;
+}
 
 // Tabs
 document.querySelectorAll('#nav button').forEach(b => b.onclick = () => {
@@ -332,10 +1288,45 @@ api('/api/health').then(h => {
   setDot('kg', h.kg_index_exists, `KG ${h.kg_index_exists ? '✓' : '✗'}`);
 }).catch(e => show($('health'), 'health failed'));
 
+loadBlueprint();
+renderLearningPanel(null);
+
 // Agent
 $('ag-run').onclick = async () => {
   const btn = $('ag-run'); btn.disabled = true;
+  appState.lastAgentResult = null;
+  renderLearningPanel(null);
   show($('ag-out'), '运行中… (可能耗时 30s ~ 数分钟)');
+  const hasCachedToolbox = Boolean($('ag-astrotool-run').value.trim());
+  if ($('ag-execute').checked && !hasCachedToolbox) {
+    const ok = window.confirm('你勾选了“真实跑数据模块”，这会联网重新跑 astro_toolbox，可能卡几分钟甚至更久。面试演示建议取消勾选，并填写已有输出目录。仍然继续吗？');
+    if (!ok) {
+      show($('ag-out'), '已取消。请取消“真实跑数据模块”，并使用已有 astro_toolbox 输出目录后再运行。');
+      btn.disabled = false;
+      return;
+    }
+  }
+  if (appState.blueprint.length) {
+    const runningTrace = appState.blueprint.map((step, idx) => ({
+      ...step,
+      status: idx === 0 ? 'running' : 'pending',
+      inputs: idx === 0 ? {
+        target: $('ag-target').value,
+        ra_deg: parseFloat($('ag-ra').value) || null,
+        dec_deg: parseFloat($('ag-dec').value) || null,
+      } : {},
+      outputs: {},
+      artifacts: [],
+      issues: [],
+      data_flow: {
+        reads: step.input_keys || [],
+        writes: step.output_keys || [],
+        artifact_files: step.artifact_files || [],
+      },
+    }));
+    appState.selectedStepId = runningTrace[0] && runningTrace[0].id;
+    renderWorkflow(runningTrace, 'ag');
+  }
   try {
     const r = await api('/api/agent/run', {
       target: $('ag-target').value,
@@ -343,11 +1334,24 @@ $('ag-run').onclick = async () => {
       dec: parseFloat($('ag-dec').value) || null,
       execute: $('ag-execute').checked,
       use_llm: $('ag-llm').checked,
+      astrotool_run: $('ag-astrotool-run').value.trim() || null,
+      skip_simbad: $('ag-simbad').checked,
+      kg_report: $('ag-kg-report').checked,
+      method_scout_llm: $('ag-method-scout').checked,
+      source_research_package: $('ag-source-package').checked,
+      download_simbad_pdfs: $('ag-download-pdfs').checked,
+      enable_claude_code: $('ag-claude').checked,
+      claude_permission_mode: $('ag-claude-mode').value,
     });
+    appState.lastAgentResult = r;
+    renderWorkflow(r.workflow_trace || [], 'ag');
+    renderLearningPanel(r);
     show($('ag-out'), r);
   } catch (e) { show($('ag-out'), String(e)); }
   btn.disabled = false;
 };
+
+$('ag-blueprint-btn').onclick = () => renderWorkflow(appState.blueprint, 'ag');
 
 // RAG
 $('rag-run').onclick = async () => {
@@ -367,6 +1371,8 @@ $('kg-run').onclick = async () => {
   const r = await api('/api/kg/search', { queries, limit: parseInt($('kg-k').value) });
   show($('kg-out'), r);
 };
+
+$('kg-visual').onclick = () => { window.location.href = '/kg'; };
 
 // Toolbox
 $('tb-run').onclick = async () => {
@@ -458,7 +1464,7 @@ $('wr-list-btn').onclick = async () => {
   const name = $('wr-run').value.trim();
   if (!name) { show($('wr-out'), '请先填 run 目录名'); return; }
   show($('wr-out'), '加载中…');
-  const r = await fetch(`/api/paper/sections/${encodeURIComponent(name)}`).then(x => x.json());
+  const r = await fetch(`${API_BASE}/api/paper/sections/${encodeURIComponent(name)}`).then(x => x.json());
   show($('wr-out'), r);
 };
 
@@ -467,6 +1473,39 @@ $('runs-refresh').onclick = async () => {
   show($('runs-out'), '加载中…');
   const r = await api('/api/runs');
   show($('runs-out'), r);
+  const root = $('runs-list');
+  clear(root);
+  (r.runs || []).forEach(run => {
+    const item = document.createElement('div');
+    item.className = 'step-item';
+    const head = document.createElement('div');
+    head.className = 'step-head';
+    const title = document.createElement('div');
+    title.className = 'step-title';
+    title.textContent = run.name;
+    const badge = document.createElement('span');
+    badge.className = 'status blueprint';
+    badge.textContent = `${(run.files || []).length} files`;
+    head.appendChild(title);
+    head.appendChild(badge);
+    const sub = document.createElement('div');
+    sub.className = 'step-sub';
+    sub.textContent = (run.files || []).slice(0, 6).join(', ') || 'no files';
+    item.appendChild(head);
+    item.appendChild(sub);
+    item.onclick = async () => {
+      appState.selectedRun = run.name;
+      show($('runs-out'), `读取 trace: ${run.name}`);
+      try {
+        const trace = await loadRunTrace(run.name);
+        show($('runs-out'), trace);
+      } catch (e) {
+        $('runs-detail').innerHTML = `<div class="trace-empty">读取 trace 失败：${String(e)}</div>`;
+        show($('runs-out'), String(e));
+      }
+    };
+    root.appendChild(item);
+  });
 };
 
 // Claude Code Toolbox
@@ -479,13 +1518,658 @@ $('cctb-refresh').onclick = async () => {
 };
 $('cctb-dry').onclick = async () => {
   const type = $('cctb-type').value;
-  const r = await api('/api/claude_code/task', {
-    method: 'POST',
-    headers: {'Content-Type':'application/json'},
-    body: JSON.stringify({type, inputs: {}, dry_run: true}),
-  });
+  const r = await api('/api/claude_code/task', { type, inputs: {}, dry_run: true });
   show($('cctb-out'), r);
 };
+
+// ====================== PAPER VIEWER (Round 4) ======================
+const paperState = {
+  current: null,        // run name
+  paper: null,          // /paper endpoint payload
+  results: null,        // /results endpoint payload
+  activeSection: null,  // section name
+};
+
+function escHtml(s) {
+  return String(s || '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
+// Light-weight TeX → HTML for paper-viewer (MathJax handles the math).
+function texToHtml(tex) {
+  if (!tex) return '';
+  let s = tex;
+  // Code-fence-style ``` already-LaTeX blocks (used in evidence packets) →
+  // drop the fences but keep content
+  s = s.replace(/```latex\s*\n?/g, '').replace(/```\s*\n?/g, '');
+  // \section{X} → <h2>, \subsection{X} → <h3>, \paragraph{X} → <h4>
+  s = s.replace(/\\section\*?\{([^}]+)\}/g, '<h2>$1</h2>');
+  s = s.replace(/\\subsection\*?\{([^}]+)\}/g, '<h3>$1</h3>');
+  s = s.replace(/\\paragraph\{([^}]+)\}/g, '<h4>$1</h4>');
+  s = s.replace(/\\textbf\{([^}]+)\}/g, '<strong>$1</strong>');
+  s = s.replace(/\\textit\{([^}]+)\}/g, '<em>$1</em>');
+  s = s.replace(/\\emph\{([^}]+)\}/g, '<em>$1</em>');
+  s = s.replace(/\\texttt\{([^}]+)\}/g, '<code>$1</code>');
+  // \citep / \citet / \cite — render as styled span (so bib keys are visible)
+  s = s.replace(/\\cite[pt]?\{([^}]+)\}/g, (_m, k) => {
+    const keys = k.split(',').map(x => x.trim()).filter(Boolean);
+    return keys.map(k => `<span class="tex-citep" title="${escHtml(k)}">[${escHtml(k)}]</span>`).join('');
+  });
+  // itemize / enumerate
+  s = s.replace(/\\begin\{itemize\}/g, '<ul>').replace(/\\end\{itemize\}/g, '</ul>');
+  s = s.replace(/\\begin\{enumerate\}/g, '<ol>').replace(/\\end\{enumerate\}/g, '</ol>');
+  s = s.replace(/\\item\s*/g, '<li>');
+  // align / align* (let MathJax do its job, keep as block)
+  s = s.replace(/\\begin\{align\*?\}/g, '<div class="math-block">$$\\begin{aligned}')
+       .replace(/\\end\{align\*?\}/g, '\\end{aligned}$$</div>');
+  // deluxetable*: simplify into HTML table.
+  s = s.replace(/\\begin\{deluxetable\*?\}\{[^}]+\}([\s\S]*?)\\end\{deluxetable\*?\}/g,
+    (_m, body) => deluxetableToHtml(body));
+  // figure environments: replace with a placeholder caption
+  s = s.replace(/\\begin\{figure\*?\}\[[^\]]*\]([\s\S]*?)\\end\{figure\*?\}/g,
+    (_m, body) => figureBlockToHtml(body));
+  // \par
+  s = s.replace(/\\par\b/g, '<br/>');
+  // \\ at line ends → <br/>
+  s = s.replace(/\\\\/g, '<br/>');
+  // \nodata
+  s = s.replace(/\\nodata/g, '—');
+  // remove \label{...}
+  s = s.replace(/\\label\{[^}]+\}/g, '');
+  // \noindent
+  s = s.replace(/\\noindent\b/g, '');
+  // \begin{abstract}/\end already stripped in section parser; keep just in case
+  s = s.replace(/\\begin\{abstract\}/g, '').replace(/\\end\{abstract\}/g, '');
+  // Soft paragraph breaks: a blank line becomes <p>
+  s = s.split(/\n{2,}/).map(b => b.trim()).filter(Boolean)
+       .map(b => b.startsWith('<') ? b : `<p>${b}</p>`).join('\n');
+  return s;
+}
+
+function deluxetableToHtml(body) {
+  // very lightweight: pick \tablecaption, then header row from \tablehead, then rows between \startdata...\enddata
+  const capM = body.match(/\\tablecaption\{([\s\S]*?)\}\s*(?:\\label|\\tablewidth|\\tablehead|$)/);
+  const headM = body.match(/\\tablehead\{([\s\S]*?)\}/);
+  const dataM = body.match(/\\startdata([\s\S]*?)\\enddata/);
+  const cap = capM ? capM[1] : '';
+  let headHtml = '';
+  if (headM) {
+    const cells = (headM[1].match(/\\colhead\{([^}]+)\}/g) || []).map(m => m.replace(/\\colhead\{|\}/g, ''));
+    headHtml = '<tr>' + cells.map(c => `<th>${escHtml(c)}</th>`).join('') + '</tr>';
+  }
+  let rowsHtml = '';
+  if (dataM) {
+    const rows = dataM[1].trim().split(/\\\\/).map(r => r.trim()).filter(Boolean);
+    for (const r of rows) {
+      const cells = r.split('&').map(c => c.trim());
+      rowsHtml += '<tr>' + cells.map(c => `<td>${escHtml(c).replace(/\\\\/g, '<br/>')}</td>`).join('') + '</tr>';
+    }
+  }
+  return `<figure><table>${headHtml}${rowsHtml}</table><figcaption><em>${escHtml(cap)}</em></figcaption></figure>`;
+}
+
+function figureBlockToHtml(body) {
+  const grM = body.match(/\\includegraphics(?:\[[^\]]*\])?\{([^}]+)\}/);
+  const capM = body.match(/\\caption\{([\s\S]*?)\}\s*(?:\\label|\\end|$)/);
+  const fname = grM ? grM[1] : '';
+  const cap = capM ? capM[1] : '';
+  if (!paperState.current || !fname) return `<blockquote>Figure: ${escHtml(cap)} (file: ${escHtml(fname)})</blockquote>`;
+  const url = `/api/runs/${encodeURIComponent(paperState.current)}/figure/${encodeURIComponent(fname)}`;
+  return `<figure><img src="${url}" alt="${escHtml(fname)}" style="max-width:100%"/><figcaption><em>${escHtml(cap)}</em></figcaption></figure>`;
+}
+
+async function paperPopulateRunSelect() {
+  const sel = $('paper-run-select');
+  if (!sel) return;
+  const r = await api('/api/runs');
+  const runs = (r.runs || []).map(x => x.name).sort().reverse();
+  sel.innerHTML = runs.map(n => `<option value="${escHtml(n)}">${escHtml(n)}</option>`).join('');
+  if (runs.length) {
+    sel.value = paperState.current || runs[0];
+    paperState.current = sel.value;
+    await loadPaper();
+  }
+}
+
+async function loadPaper() {
+  const sel = $('paper-run-select');
+  const name = (sel && sel.value) || paperState.current;
+  if (!name) return;
+  paperState.current = name;
+  $('paper-title').textContent = '加载中…';
+  $('paper-content').innerHTML = '<div class="placeholder">加载中…</div>';
+  // Parallel fetch paper + results
+  const [paper, results] = await Promise.all([
+    api(`/api/runs/${encodeURIComponent(name)}/paper`).catch(e => ({ error: String(e) })),
+    api(`/api/runs/${encodeURIComponent(name)}/results`).catch(e => ({ error: String(e) })),
+  ]);
+  if (paper && paper.error) {
+    $('paper-title').textContent = '加载失败';
+    $('paper-content').innerHTML = `<div class="placeholder">${escHtml(paper.error)}</div>`;
+    return;
+  }
+  paperState.paper = paper;
+  paperState.results = results;
+  renderPaperHeader();
+  renderPaperSections();
+  renderPaperFigures();
+  renderPaperHeadlines();
+  renderPaperNovelty();
+  renderPaperQcList();
+  // Auto-select first section
+  if (paper.sections && paper.sections.length) {
+    selectSection(paper.sections[0].name);
+  }
+}
+
+function renderPaperHeader() {
+  const p = paperState.paper || {};
+  const r = paperState.results || {};
+  $('paper-title').textContent = p.title || '(no title)';
+  const lines = [
+    `target = ${escHtml(r.target || '?')}`,
+    `RA/Dec = ${r.coords_deg ? r.coords_deg.map(x => Number(x).toFixed(4)).join(', ') : '?'}`,
+    `source_class = <code>${escHtml(r.source_class || '?')}</code>`,
+    `paper.tex = ${p.n_lines || '?'} 行 / ${p.n_chars || '?'} chars`,
+    `QC: ${escHtml((r.paper_qc || {}).summary || '?')}`,
+    `LaTeX→PDF: ${escHtml((r.latex_compile || {}).status || 'n/a')}`,
+  ];
+  $('paper-meta').innerHTML = lines.join(' &nbsp;·&nbsp; ');
+  const qc = (r.paper_qc || {});
+  const verdict = qc.verdict || '?';
+  const pill = $('paper-qc-pill');
+  pill.textContent = `QC: ${qc.summary || verdict}`;
+  pill.className = 'pill qc-' + verdict + '-pill';
+  $('paper-class-pill').textContent = r.source_class ? `class: ${r.source_class}` : '';
+  // PDF link if available
+  const pdfA = $('paper-pdf-link');
+  if (r.latex_compile && r.latex_compile.pdf_path) {
+    pdfA.style.display = '';
+    pdfA.href = `/api/runs/${encodeURIComponent(paperState.current)}/pdf`;
+  } else {
+    pdfA.style.display = 'none';
+  }
+  // .tex link
+  const texA = $('paper-tex-link');
+  texA.style.display = '';
+  texA.href = `/api/runs/${encodeURIComponent(paperState.current)}/tex`;
+}
+
+function renderPaperSections() {
+  const list = $('paper-section-list');
+  const sections = (paperState.paper && paperState.paper.sections) || [];
+  list.innerHTML = sections.map(s => {
+    const words = (s.tex || '').split(/\s+/).filter(Boolean).length;
+    return `<li data-section="${escHtml(s.name)}" onclick="selectSection('${escHtml(s.name)}')">
+      ${escHtml(s.name)}<span class="word-count">${words} w</span>
+    </li>`;
+  }).join('');
+}
+
+function selectSection(name) {
+  paperState.activeSection = name;
+  const items = document.querySelectorAll('#paper-section-list li');
+  items.forEach(li => li.classList.toggle('active', li.dataset.section === name));
+  const sections = (paperState.paper && paperState.paper.sections) || [];
+  const sec = sections.find(s => s.name === name);
+  if (!sec) {
+    $('paper-content').innerHTML = '<div class="placeholder">章节不存在</div>';
+    return;
+  }
+  $('paper-content').innerHTML = `<h2>${escHtml(sec.name)}</h2>` + texToHtml(sec.tex);
+  // Trigger MathJax rendering on the new content
+  if (window.MathJax && window.MathJax.typesetPromise) {
+    window.MathJax.typesetPromise([$('paper-content')]).catch(() => {});
+  }
+}
+
+function renderPaperHeadlines() {
+  const r = paperState.results || {};
+  const rows = r.headline_numbers || [];
+  if (!rows.length) {
+    $('paper-headlines').innerHTML = '<div style="color:#94a3b1;font-size:12px;font-style:italic">(no headline numbers yet)</div>';
+    return;
+  }
+  const html = rows.map(row => {
+    const val = row.value === null ? '—'
+      : (row.error ? `${Number(row.value).toPrecision(4)} ± ${Number(row.error).toPrecision(3)}`
+                   : `${row.value}`);
+    return `<div class="headline">
+      <span class="param">${escHtml(row.parameter)}</span>
+      <span class="val">${escHtml(val)} ${escHtml(row.unit || '')}</span>
+      <span class="kind">${escHtml(row.kind)}</span>
+    </div>`;
+  }).join('');
+  $('paper-headlines').innerHTML = html;
+}
+
+function renderPaperFigures() {
+  const figs = (paperState.paper && paperState.paper.figures) || [];
+  if (!figs.length) {
+    $('paper-figures').innerHTML = '<div style="color:#94a3b1;font-size:12px;font-style:italic">(no figures)</div>';
+    return;
+  }
+  const html = figs.map(f => {
+    const url = `/api/runs/${encodeURIComponent(paperState.current)}/figure/${encodeURIComponent(f.filename)}`;
+    return `<div class="paper-figure">
+      <img src="${url}" alt="${escHtml(f.filename)}" loading="lazy" />
+      <div class="name">${escHtml(f.filename)}</div>
+      <div class="cap">${escHtml(f.caption || '')}</div>
+    </div>`;
+  }).join('');
+  $('paper-figures').innerHTML = html;
+}
+
+function renderPaperNovelty() {
+  const p = paperState.paper || {};
+  const nv = p.novelty || {};
+  const cmp = p.comparison_table || {};
+  const items = (nv.items || []);
+  const cnts = nv.verdict_counts || {};
+  let html = '';
+  if (Object.keys(cnts).length) {
+    html += '<div style="font-size:12px;color:#4a5563;margin-bottom:6px">Verdict 分布：' +
+      Object.entries(cnts).map(([k, v]) => `<code>${k}</code>×${v}`).join(', ') + '</div>';
+  }
+  if (items.length) {
+    html += '<ul style="margin:0;padding-left:18px;font-size:12px">';
+    for (const it of items.slice(0, 8)) {
+      const v = it.this_work_value;
+      const lv = it.lit_value;
+      let label = `<strong>${escHtml(it.parameter)}</strong> — ${escHtml(it.verdict || '?')}`;
+      if (it.kind === 'comparison') label += ` (this=${v}, lit=${lv})`;
+      else if (it.kind === 'this_work_only') label += ` (this=${v})`;
+      else if (it.kind === 'literature_only') label += ` (lit=${lv})`;
+      html += `<li style="margin:3px 0">${label}</li>`;
+    }
+    html += '</ul>';
+  }
+  if (cmp.status === 'ok') {
+    html += `<div style="margin-top:6px;font-size:11.5px;color:#6b7785;">对照表：${escHtml(cmp.source_class)} × ${cmp.n_benchmarks} benchmarks × ${cmp.n_parameters} params</div>`;
+  }
+  if (!html) html = '<div style="color:#94a3b1;font-size:12px;font-style:italic">(no novelty data)</div>';
+  $('paper-novelty').innerHTML = html;
+}
+
+function renderPaperQcList() {
+  const p = paperState.paper || {};
+  const checks = (p.paper_qc || {}).checks || [];
+  if (!checks.length) {
+    $('paper-qc-list').innerHTML = '<li style="color:#94a3b1;font-style:italic">(no QC data)</li>';
+    return;
+  }
+  $('paper-qc-list').innerHTML = checks.map(c => {
+    const cls = c.verdict === 'pass' ? 'qc-pass' : (c.verdict === 'fail' ? 'qc-fail' : 'qc-warn');
+    return `<li class="${cls}"><span class="qc-id">${escHtml(c.id)}</span><span class="qc-reason">${escHtml(c.reason)}</span></li>`;
+  }).join('');
+}
+
+async function submitRewrite() {
+  if (!paperState.current || !paperState.activeSection) {
+    $('rewrite-status').textContent = '请先选一个 run 和章节';
+    return;
+  }
+  const advice = $('rewrite-advice').value.trim();
+  const provider = $('rewrite-provider').value || null;
+  const use_llm = $('rewrite-llm').checked;
+  $('rewrite-status').textContent = '提交中…';
+  const r = await api(`/api/runs/${encodeURIComponent(paperState.current)}/rewrite`, {
+    section: paperState.activeSection,
+    use_llm: use_llm,
+    llm_provider: provider,
+    additional_instructions: advice || null,
+  });
+  if (r.error) {
+    $('rewrite-status').textContent = '失败: ' + r.error;
+    return;
+  }
+  $('rewrite-status').innerHTML = `✓ 已记录重写指令 (${escHtml(r.section)})。<br/>
+    下一步：在「Agent 全流程」标签把 output_root 设为 <code>${escHtml(r.suggested_run_payload.output_root)}</code> 并 use_llm 启用，重新跑一次以应用重写。`;
+}
+
+// Hook the paper tab navigation
+document.addEventListener('DOMContentLoaded', () => {
+  // The existing nav handler should already wire data-tab; we just need to
+  // populate the run dropdown when the paper tab is the active one initially.
+  paperPopulateRunSelect();
+  const sel = $('paper-run-select');
+  if (sel) sel.onchange = () => loadPaper();
+});
+
+// Also re-populate when the user clicks the 论文 tab manually
+document.querySelectorAll('#nav button[data-tab="paper"]').forEach(btn => {
+  btn.addEventListener('click', () => {
+    if (!paperState.paper) paperPopulateRunSelect();
+  });
+});
+
+// =========================================================================
+// PR4 / D1: White-dwarf domain badges (right column of the paper viewer)
+// =========================================================================
+function renderWdBadges() {
+  const p = paperState.paper || {};
+  const pc = p.physics_checks || {};
+  const root = $('paper-wd-badges');
+  const cnt = $('wd-badges-count');
+  if (!root) return;
+  // physics_checks.py emits {sections: [...], <id>: {...}, ...} or
+  // {checks: {<id>: {verdict, ...}}}.  Be tolerant.
+  const items = [];
+  const knownIds = ['rayleigh_jeans', 'ingress_time', 'tidal_truncation', 'mass_lum_sanity'];
+  knownIds.forEach(id => {
+    let info = pc[id] || (pc.checks && pc.checks[id]) || null;
+    if (!info && pc.results) info = pc.results[id];
+    items.push({id, info});
+  });
+  const html = items.map(({id, info}) => {
+    if (!info) {
+      return `<span class="wd-badge empty">${id} —</span>`;
+    }
+    const verdict = info.verdict || (info.status === 'ok' ? 'pass' : 'warn');
+    const klass = verdict === 'pass' ? 'pass' : (verdict === 'fail' ? 'fail' : 'warn');
+    const reason = info.reason || info.summary || '';
+    const short = reason ? ` ${escHtml(String(reason).slice(0, 32))}` : '';
+    return `<span class="wd-badge ${klass}" onclick="toggleWdBadge('${id}')">${id}${short ? ':' : ''}${short}</span>`;
+  }).join(' ');
+  root.innerHTML = html + `<div id="wd-badge-detail-box"></div>`;
+  if (cnt) cnt.textContent = `(${items.filter(x => x.info).length}/4)`;
+}
+
+function toggleWdBadge(id) {
+  const p = paperState.paper || {};
+  const pc = p.physics_checks || {};
+  const info = pc[id] || (pc.checks && pc.checks[id]) || (pc.results && pc.results[id]);
+  const box = $('wd-badge-detail-box');
+  if (!box) return;
+  if (!info) {
+    box.innerHTML = `<div class="wd-badge-detail">No data for ${escHtml(id)} (physics_checks not run).</div>`;
+    return;
+  }
+  const lines = [];
+  Object.keys(info).forEach(k => {
+    if (k === 'latex') return;
+    const v = info[k];
+    if (typeof v === 'object') return;
+    lines.push(`<b>${escHtml(k)}:</b> ${escHtml(String(v))}`);
+  });
+  let body = lines.join('<br>');
+  if (info.latex) {
+    body += `<details style="margin-top:6px"><summary style="cursor:pointer">LaTeX argument</summary>
+      <pre style="white-space:pre-wrap;font-size:11px">${escHtml(String(info.latex).slice(0, 1200))}</pre></details>`;
+  }
+  box.innerHTML = `<div class="wd-badge-detail">${body}</div>`;
+}
+
+// =========================================================================
+// PR4 / D4: Reviewer pass
+// =========================================================================
+async function runReviewerPass() {
+  const name = paperState.current;
+  if (!name) return;
+  const btn = $('reviewer-run-btn');
+  const out = $('reviewer-result');
+  if (btn) btn.disabled = true;
+  if (out) out.innerHTML = '审稿中… (调用 Claude，30-60s)';
+  try {
+    const r = await api(`/api/runs/${encodeURIComponent(name)}/reviewer-pass`, {provider: ''});
+    renderReviewerResult(r.result);
+  } catch (e) {
+    if (out) out.innerHTML = `<span style="color:#9a1f1f">${escHtml(String(e))}</span>`;
+  } finally {
+    if (btn) btn.disabled = false;
+  }
+}
+
+function renderReviewerResult(rv) {
+  const out = $('reviewer-result');
+  if (!out || !rv) return;
+  const s = rv.score || {};
+  const decisionColor = {accept:'pass', minor_revise:'warn', major_revise:'warn', reject:'fail'};
+  const dk = decisionColor[rv.decision] || 'warn';
+  const issues = (rv.issues || []).slice(0, 6);
+  const wdc = (rv.wd_specific_concerns || []).slice(0, 4);
+  out.innerHTML = `
+    <div class="reviewer-score-row">
+      <span class="pill">rigor ${s.rigor ?? '?'}</span>
+      <span class="pill">grounding ${s.grounding ?? '?'}</span>
+      <span class="pill">clarity ${s.clarity ?? '?'}</span>
+      <span class="pill">figures ${s.figures ?? '?'}</span>
+      <span class="wd-badge ${dk}" style="font-size:11.5px">overall ${s.overall ?? '?'} · ${escHtml(rv.decision || '?')}</span>
+    </div>
+    ${rv.weakest_section ? `<div style="font-size:12px;margin:4px 0">weakest: <code>${escHtml(rv.weakest_section)}</code></div>` : ''}
+    ${(rv.questions || []).length ? `<div style="font-size:12px;margin-top:4px"><b>Questions</b><ul style="margin:2px 0 0 18px">${rv.questions.slice(0,5).map(q=>`<li>${escHtml(q)}</li>`).join('')}</ul></div>` : ''}
+    ${wdc.length ? `<div style="font-size:12px;margin-top:4px"><b>WD-specific concerns</b><ul style="margin:2px 0 0 18px">${wdc.map(q=>`<li>${escHtml(q)}</li>`).join('')}</ul></div>` : ''}
+  `;
+}
+
+// Hook the renderers into loadPaper (it already runs on every load but
+// these new functions need to be invoked too)
+const _origLoadPaper = loadPaper;
+window.loadPaper = async function() {
+  await _origLoadPaper();
+  renderWdBadges();
+  // reset reviewer panel on new run
+  const out = $('reviewer-result'); if (out) out.innerHTML = '';
+};
+
+// =========================================================================
+// PR4 / D2: Ablation Dashboard
+// =========================================================================
+let ablationState = {matrix: null, results: []};
+
+async function loadAblation() {
+  $('ablation-status').textContent = '载入中…';
+  try {
+    const [m, r, lb] = await Promise.all([
+      api('/api/ablation/matrix').catch(()=>({configs:[],targets:[]})),
+      api('/api/ablation/results').catch(()=>({rows:[]})),
+      api('/api/ablation/leaderboard').catch(()=>({top:[]})),
+    ]);
+    ablationState.matrix = m;
+    ablationState.results = r.rows || [];
+    renderAblationHeatmap();
+    renderAblationLoo();
+    renderAblationLeaderboard(lb.top || []);
+    renderAblationCsvRows();
+    $('ablation-status').textContent = `${ablationState.results.length} rows`;
+  } catch (e) {
+    $('ablation-status').textContent = String(e);
+  }
+}
+
+function _scoreColor(v) {
+  if (v == null || isNaN(v)) return '#f3f5f7';
+  v = Math.max(0, Math.min(1, +v));
+  // green-ish gradient: 0 -> light gray, 1 -> mint
+  const r = Math.round(243 - 150*v), g = Math.round(245 - 50*v), b = Math.round(247 - 80*v);
+  return `rgb(${r},${g},${b})`;
+}
+
+function renderAblationHeatmap() {
+  const root = $('ablation-heatmap');
+  const m = ablationState.matrix;
+  if (!m || !m.configs || !m.targets) { root.innerHTML = '<i>no matrix</i>'; return; }
+  const cells = {};
+  ablationState.results.forEach(row => {
+    cells[`${row.config_id}|${row.target_id}`] = row;
+  });
+  let html = '<table><thead><tr><th>config</th>';
+  m.targets.forEach(t => { html += `<th>${escHtml(t.id)}</th>`; });
+  html += '</tr></thead><tbody>';
+  m.configs.forEach(cfg => {
+    html += `<tr><th style="text-align:left">${escHtml(cfg.id)}</th>`;
+    m.targets.forEach(t => {
+      const row = cells[`${cfg.id}|${t.id}`];
+      if (!row) {
+        html += `<td class="cell" style="background:#f3f5f7" onclick="runAblationRow('${cfg.id}','${t.id}',false)" title="click to run">▶</td>`;
+      } else {
+        const c = parseFloat(row.composite || 0);
+        html += `<td class="cell" style="background:${_scoreColor(c)}" title="qc=${row.qc_pass}/${row.qc_warn}/${row.qc_fail} composite=${c.toFixed(3)}" onclick="showAblationCell('${cfg.id}','${t.id}')">${c.toFixed(2)}</td>`;
+      }
+    });
+    html += '</tr>';
+  });
+  html += '</tbody></table>';
+  root.innerHTML = html;
+}
+
+function renderAblationLoo() {
+  const root = $('ablation-loo-chart');
+  if (!root) return;
+  const rows = ablationState.results;
+  // baseline composite per target
+  const baseByT = {};
+  rows.forEach(r => { if (r.config_id === 'baseline') baseByT[r.target_id] = parseFloat(r.composite || 0); });
+  const looIds = rows.map(r => r.config_id).filter(c => c.startsWith('loo_'));
+  const uniq = [...new Set(looIds)];
+  if (!uniq.length) { root.innerHTML = '<i>no leave-one-out rows yet</i>'; return; }
+  const html = ['<table style="width:100%"><tr><th style="text-align:left">config</th><th>ΔComposite (mean)</th></tr>'];
+  uniq.forEach(cid => {
+    const cellRows = rows.filter(r => r.config_id === cid);
+    let sum = 0, n = 0;
+    cellRows.forEach(r => {
+      const base = baseByT[r.target_id]; if (base == null) return;
+      sum += (parseFloat(r.composite || 0) - base); n++;
+    });
+    const delta = n ? sum / n : 0;
+    const sign = delta >= 0 ? '+' : '';
+    const w = Math.max(2, Math.min(200, Math.abs(delta) * 400));
+    html.push(`<tr><td>${escHtml(cid)}</td><td><span class="ablation-bar" style="width:${w}px;background:${delta>=0?'#5dc8b7':'#e26666'}"></span> ${sign}${delta.toFixed(3)}</td></tr>`);
+  });
+  html.push('</table>');
+  root.innerHTML = html.join('');
+}
+
+function renderAblationLeaderboard(top) {
+  const root = $('ablation-leaderboard');
+  if (!root) return;
+  if (!top.length) { root.innerHTML = '<i>no completed rows yet</i>'; return; }
+  let html = '<table style="width:100%"><tr><th>#</th><th>config</th><th>target</th><th>composite</th><th>qc(p/w/f)</th><th>numeric</th><th>claim</th><th>bib</th></tr>';
+  top.forEach((r, i) => {
+    html += `<tr><td>${i+1}</td><td>${escHtml(r.config_id)}</td><td>${escHtml(r.target_id)}</td>
+      <td><b>${parseFloat(r.composite).toFixed(3)}</b></td>
+      <td>${r.qc_pass}/${r.qc_warn}/${r.qc_fail}</td>
+      <td>${parseFloat(r.numeric_iou).toFixed(2)}</td>
+      <td>${parseFloat(r.claim_overlap).toFixed(2)}</td>
+      <td>${parseFloat(r.bibcode_jaccard).toFixed(2)}</td></tr>`;
+  });
+  html += '</table>';
+  root.innerHTML = html;
+}
+
+function renderAblationCsvRows() {
+  const root = $('ablation-csv-rows');
+  if (!root) return;
+  const rows = ablationState.results.slice(-40).reverse();
+  if (!rows.length) { root.innerHTML = '<i>(empty)</i>'; return; }
+  const cols = ['timestamp','config_id','target_id','qc_verdict','composite','wall_seconds','error'];
+  let html = '<table style="width:100%"><tr>'+cols.map(c=>`<th>${escHtml(c)}</th>`).join('')+'</tr>';
+  rows.forEach(r=>{
+    html += '<tr>'+cols.map(c=>`<td>${escHtml(String(r[c]||''))}</td>`).join('')+'</tr>';
+  });
+  html += '</table>';
+  root.innerHTML = html;
+}
+
+async function runAblationRow(configId, targetId, dryRun) {
+  $('ablation-status').textContent = `请求中… ${configId} × ${targetId}${dryRun?' (dry-run)':''}`;
+  try {
+    const r = await api('/api/ablation/run', {config_id: configId, target_id: targetId, dry_run: !!dryRun});
+    $('ablation-status').textContent = `已启动 PID=${r.pid}; 等几秒后点 ⟳ 刷新看结果`;
+  } catch (e) {
+    $('ablation-status').textContent = `错误: ${e}`;
+  }
+}
+
+function showAblationCell(configId, targetId) {
+  const row = ablationState.results.find(r => r.config_id === configId && r.target_id === targetId);
+  if (!row) return;
+  alert(`${configId} × ${targetId}\noutput_root: ${row.output_root}\nqc: ${row.qc_pass}/${row.qc_warn}/${row.qc_fail} (${row.qc_verdict})\ncomposite: ${row.composite}\nnumeric_iou: ${row.numeric_iou}\nclaim_overlap: ${row.claim_overlap}\nbibcode_jaccard: ${row.bibcode_jaccard}\nphysics_pass_rate: ${row.physics_pass_rate}\nwall: ${row.wall_seconds}s\nerror: ${row.error || 'none'}`);
+}
+
+document.querySelectorAll('#nav button[data-tab="ablation"]').forEach(btn => {
+  btn.addEventListener('click', () => loadAblation());
+});
+
+// =========================================================================
+// PR4 / D3: Prompt Lab
+// =========================================================================
+let promptLabState = {items: [], current: null};
+
+async function loadPromptLab() {
+  try {
+    const [list, exp] = await Promise.all([
+      api('/api/prompts/list').catch(()=>({items:[]})),
+      api('/api/prompts/experiments').catch(()=>({status:'empty'})),
+    ]);
+    promptLabState.items = list.items || [];
+    renderPromptList();
+    renderPromptExperiments(exp);
+    if (promptLabState.items.length && !promptLabState.current) {
+      selectPrompt(promptLabState.items[0].name);
+    }
+  } catch (e) {
+    $('promptlab-list').innerHTML = `<li>error: ${escHtml(String(e))}</li>`;
+  }
+}
+
+function renderPromptList() {
+  const root = $('promptlab-list');
+  if (!root) return;
+  root.innerHTML = promptLabState.items.map(it => {
+    const cls = it.name === promptLabState.current ? 'active' : '';
+    const ovr = it.has_override ? '<span class="ovr-flag">●override</span>' : '';
+    return `<li class="${cls}" onclick="selectPrompt('${it.name}')">${escHtml(it.name)}${ovr}</li>`;
+  }).join('');
+}
+
+function selectPrompt(name) {
+  promptLabState.current = name;
+  const item = promptLabState.items.find(x => x.name === name);
+  if (!item) return;
+  $('promptlab-name').textContent = name + (item.has_override ? '  (override active)' : '  (default)');
+  $('promptlab-edit').value = item.content || '';
+  renderPromptList();
+  $('promptlab-save-status').textContent = '';
+}
+
+async function promptSave(asDelete) {
+  const name = promptLabState.current;
+  if (!name) return;
+  const content = asDelete ? '' : $('promptlab-edit').value;
+  $('promptlab-save-status').textContent = '保存中…';
+  try {
+    const r = await api('/api/prompts/save', {name, content});
+    $('promptlab-save-status').textContent = `${r.status}` + (r.bytes ? ` (${r.bytes}B)` : '');
+    // refresh list to update has_override flag
+    await loadPromptLab();
+  } catch (e) {
+    $('promptlab-save-status').textContent = `error: ${e}`;
+  }
+}
+
+function renderPromptExperiments(exp) {
+  const root = $('promptlab-exp-summary');
+  if (!root) return;
+  if (!exp || exp.status !== 'ok') { root.innerHTML = '<i>(no experiments yet)</i>'; return; }
+  let html = `<div>total prompt calls logged: <b>${exp.total}</b></div>`;
+  html += '<table style="width:100%;margin-top:6px"><tr><th>specialist</th><th>section</th><th>n</th><th>avg pass</th><th>avg fail</th><th>avg chars</th></tr>';
+  (exp.by_specialist_section || []).forEach(r => {
+    html += `<tr><td>${escHtml(r.specialist)}</td><td>${escHtml(r.section)}</td>
+      <td>${r.n}</td>
+      <td>${(r.avg_pass||0).toFixed(2)}</td>
+      <td>${(r.avg_fail||0).toFixed(2)}</td>
+      <td>${Math.round(r.avg_chars||0)}</td></tr>`;
+  });
+  html += '</table>';
+  root.innerHTML = html;
+}
+
+document.querySelectorAll('#nav button[data-tab="promptlab"]').forEach(btn => {
+  btn.addEventListener('click', () => loadPromptLab());
+});
+
 </script>
 </body>
 </html>

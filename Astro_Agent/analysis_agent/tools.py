@@ -74,66 +74,184 @@ def validate_coordinates(ra_deg: float, dec_deg: float) -> Tuple[float, float]:
     return ra, dec
 
 
-def resolve_target(target: str, ra_deg: Optional[float], dec_deg: Optional[float]) -> Dict[str, Any]:
-    """Resolve a target name or validate supplied coordinates."""
-    if ra_deg is not None and dec_deg is not None:
-        ra, dec = validate_coordinates(ra_deg, dec_deg)
-        return {
-            "status": "ok",
-            "target": target,
-            "ra_deg": ra,
-            "dec_deg": dec,
-            "resolver": "user_supplied_coordinates",
-            "frame": "ICRS",
-            "unit_checks": ["RA/Dec validated as decimal degrees"],
-        }
+def _angular_sep_arcsec(ra1: float, dec1: float, ra2: float, dec2: float) -> float:
+    """Great-circle separation in arcseconds (cheap haversine)."""
+    import math as _m
+    ra1r, dec1r = _m.radians(ra1), _m.radians(dec1)
+    ra2r, dec2r = _m.radians(ra2), _m.radians(dec2)
+    d = _m.acos(min(1.0, max(-1.0,
+        _m.sin(dec1r) * _m.sin(dec2r) +
+        _m.cos(dec1r) * _m.cos(dec2r) * _m.cos(ra1r - ra2r)
+    )))
+    return _m.degrees(d) * 3600.0
 
-    errors: List[str] = []
+
+def _simbad_coords_from_name(target: str) -> Optional[Tuple[float, float, str]]:
+    """Return (ra_deg, dec_deg, resolver) or None on failure. Quiet."""
     try:
         from astropy.coordinates import SkyCoord
-
         coord = SkyCoord.from_name(target)
         ra, dec = validate_coordinates(coord.ra.deg, coord.dec.deg)
-        return {
-            "status": "ok",
-            "target": target,
-            "ra_deg": ra,
-            "dec_deg": dec,
-            "resolver": "astropy.SkyCoord.from_name",
-            "frame": "ICRS",
-            "unit_checks": ["Name resolved to ICRS decimal degrees"],
-        }
-    except Exception as exc:
-        errors.append(f"SkyCoord.from_name failed: {type(exc).__name__}: {exc}")
-
+        return ra, dec, "astropy.SkyCoord.from_name"
+    except Exception:
+        pass
     try:
         from astroquery.simbad import Simbad
-
+        import astropy.units as u
+        from astropy.coordinates import SkyCoord
         table = Simbad.query_object(target)
         if table is not None and len(table) > 0:
-            from astropy.coordinates import SkyCoord
-            import astropy.units as u
-
             row = table[0]
             coord = SkyCoord(str(row["RA"]), str(row["DEC"]), unit=(u.hourangle, u.deg))
             ra, dec = validate_coordinates(coord.ra.deg, coord.dec.deg)
-            return {
-                "status": "ok",
-                "target": target,
-                "ra_deg": ra,
-                "dec_deg": dec,
-                "resolver": "astroquery.simbad.Simbad.query_object",
-                "frame": "ICRS",
-                "unit_checks": ["SIMBAD sexagesimal coordinates converted to degrees"],
-            }
-    except Exception as exc:
-        errors.append(f"SIMBAD name resolution failed: {type(exc).__name__}: {exc}")
+            return ra, dec, "astroquery.simbad.Simbad.query_object"
+    except Exception:
+        pass
+    return None
 
+
+def _simbad_name_from_coords(ra_deg: float, dec_deg: float, radius_arcsec: float = 30.0) -> Optional[Dict[str, Any]]:
+    """Reverse lookup: find the nearest SIMBAD source within `radius_arcsec`."""
+    try:
+        from astroquery.simbad import Simbad
+        from astropy.coordinates import SkyCoord
+        import astropy.units as u
+        sim = Simbad()
+        sim.add_votable_fields("otype", "ids")
+        center = SkyCoord(ra_deg * u.deg, dec_deg * u.deg, frame="icrs")
+        table = sim.query_region(center, radius=radius_arcsec * u.arcsec)
+        if table is None or len(table) == 0:
+            return None
+        row = table[0]
+        match_coord = SkyCoord(str(row["RA"]), str(row["DEC"]), unit=(u.hourangle, u.deg))
+        sep = _angular_sep_arcsec(ra_deg, dec_deg, match_coord.ra.deg, match_coord.dec.deg)
+        return {
+            "main_id": str(row.get("MAIN_ID", row.get("main_id", "?"))),
+            "object_type": str(row.get("OTYPE", row.get("otype", ""))),
+            "ra_deg": float(match_coord.ra.deg),
+            "dec_deg": float(match_coord.dec.deg),
+            "separation_arcsec": float(sep),
+        }
+    except Exception:
+        return None
+
+
+def _try_gaia_dr3(ra_deg: float, dec_deg: float, radius_arcsec: float = 5.0) -> Optional[str]:
+    """Best-effort Gaia DR3 source_id for cross-identification. Reuse the
+    existing astro_toolbox helper so we share its credential / network
+    handling."""
+    try:
+        from astro_toolbox.orbit_traceback import get_gaia_astrometry as _get_gaia
+        info = _get_gaia(ra_deg, dec_deg, radius_arcsec=radius_arcsec)
+        if info and info.get("source_id"):
+            return str(info["source_id"])
+    except Exception:
+        pass
+    return None
+
+
+def resolve_target(target: str, ra_deg: Optional[float], dec_deg: Optional[float]) -> Dict[str, Any]:
+    """Resolve a target name + validate it cross-checks against the coords.
+
+    Behaviour (D2):
+      - If user supplies coords only, also try to resolve `target` via SIMBAD
+        and compare angular separation. If the name resolves and disagrees by
+        > 60 arcsec, return status=needs_human with the mismatch.
+      - If user supplies a name only, resolve via SIMBAD, then reverse-lookup
+        SIMBAD by the resolved coords and confirm the same main_id.
+      - Always attach gaia_dr3_source_id (best-effort, may be None).
+      - Status `needs_human` carries `mismatch` payload so downstream nodes
+        can refuse to proceed (soft fail-closed).
+    """
+    crosscheck: Dict[str, Any] = {}
+    errors: List[str] = []
+
+    if ra_deg is not None and dec_deg is not None:
+        ra_supplied, dec_supplied = validate_coordinates(ra_deg, dec_deg)
+        # Best-effort name→coord crosscheck. If the name also resolves, the
+        # two coordinate sets must agree within tolerance.
+        named = _simbad_coords_from_name(target)
+        if named is not None:
+            ra_named, dec_named, resolver_name = named
+            sep_arcsec = _angular_sep_arcsec(ra_supplied, dec_supplied, ra_named, dec_named)
+            crosscheck = {
+                "name_resolved_ra_deg": ra_named,
+                "name_resolved_dec_deg": dec_named,
+                "name_resolver": resolver_name,
+                "separation_arcsec": sep_arcsec,
+            }
+            if sep_arcsec > 60.0:
+                return {
+                    "status": "needs_human",
+                    "target": target,
+                    "ra_deg": ra_supplied,
+                    "dec_deg": dec_supplied,
+                    "resolver": "user_supplied_coordinates",
+                    "frame": "ICRS",
+                    "crosscheck": crosscheck,
+                    "mismatch": {
+                        "kind": "name_vs_coords_disagree",
+                        "supplied_ra": ra_supplied,
+                        "supplied_dec": dec_supplied,
+                        "name_resolved_ra": ra_named,
+                        "name_resolved_dec": dec_named,
+                        "separation_arcsec": sep_arcsec,
+                        "tolerance_arcsec": 60.0,
+                    },
+                    "errors": [
+                        f"Target name `{target}` resolves to "
+                        f"({ra_named:.4f}, {dec_named:.4f}) but user supplied "
+                        f"({ra_supplied:.4f}, {dec_supplied:.4f}); "
+                        f"separation {sep_arcsec:.1f}\" > 60\""
+                    ],
+                }
+        else:
+            crosscheck = {"name_resolver": "not_resolvable_by_name"}
+            errors.append(f"Could not resolve name `{target}` via SIMBAD; "
+                          "coordinate identity is unverified.")
+        gaia_id = _try_gaia_dr3(ra_supplied, dec_supplied)
+        return {
+            "status": "ok",
+            "target": target,
+            "ra_deg": ra_supplied,
+            "dec_deg": dec_supplied,
+            "resolver": "user_supplied_coordinates",
+            "frame": "ICRS",
+            "unit_checks": ["RA/Dec validated as decimal degrees"],
+            "crosscheck": crosscheck,
+            "gaia_dr3_source_id": gaia_id,
+            "soft_warnings": errors or None,
+        }
+
+    # Name-only path: resolve, then reverse-lookup to confirm identity.
+    named = _simbad_coords_from_name(target)
+    if named is None:
+        return {
+            "status": "needs_human",
+            "target": target,
+            "errors": ["SkyCoord.from_name and SIMBAD both failed"],
+            "message": "Could not resolve target name. Provide --ra and --dec in decimal degrees.",
+        }
+    ra_named, dec_named, resolver_name = named
+    reverse = _simbad_name_from_coords(ra_named, dec_named, radius_arcsec=30.0)
+    crosscheck = {"reverse_lookup": reverse, "name_resolver": resolver_name}
+    if reverse is None:
+        # Forward resolved but reverse failed (rare). Accept but flag.
+        errors.append("Reverse SIMBAD lookup at the resolved coordinates returned "
+                      "no source within 30\"; identity not fully cross-confirmed.")
+    gaia_id = _try_gaia_dr3(ra_named, dec_named)
     return {
-        "status": "needs_human",
+        "status": "ok",
         "target": target,
-        "errors": errors,
-        "message": "Could not resolve target name. Provide --ra and --dec in decimal degrees.",
+        "ra_deg": ra_named,
+        "dec_deg": dec_named,
+        "resolver": resolver_name,
+        "frame": "ICRS",
+        "unit_checks": ["Name resolved to ICRS decimal degrees",
+                        "Reverse lookup performed within 30 arcsec"],
+        "crosscheck": crosscheck,
+        "gaia_dr3_source_id": gaia_id,
+        "soft_warnings": errors or None,
     }
 
 

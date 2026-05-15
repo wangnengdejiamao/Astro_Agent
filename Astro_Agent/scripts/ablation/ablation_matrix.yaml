@@ -1,0 +1,141 @@
+# Ablation matrix for the white-dwarf paper-writer agent.
+#
+# Each row is a (config_id, target, flags) triple. flags are passed
+# through to run_workflow() in workflow.py via state initialisation.
+# The two targets are kept fixed (UPK13c2 and ZTFJ2130 = double_gold).
+# Configs that cannot be expressed as state flags rely on environment
+# variables PROMPT_VARIANT={legacy,wd_domain_v1} which the prompts
+# loader honours via override files.
+
+defaults:
+  use_llm: true
+  provider: claude
+  output_root_template: "output/analysis_agent/ablation_{config_id}_{target_short}"
+  reflexion_max_iters: 1
+  best_of_n: 1
+
+targets:
+  - id: UPK13c2
+    short: upk
+    target: "UPK13-c2"
+    ra_deg: 92.225
+    dec_deg: 30.137
+    gold: scripts/ablation/golds/UPK13c2_gold.json
+    astrotool_run: output/analysis_agent/UPK13c2_stage34/astrotool_run
+  - id: ZTFJ2130
+    short: ztf
+    target: "ZTFJ2130+4420"
+    ra_deg: 322.7363
+    dec_deg: 44.3463
+    gold: scripts/ablation/golds/ZTFJ2130_gold.json
+    astrotool_run: output/analysis_agent/ZTFJ2130_v21_stage34/astrotool_run
+
+# 14 rows: baseline + 7 leave-one-out + 4 reflexion sweeps + 2 BoN.
+configs:
+
+  - id: baseline
+    description: "All features on (wd_domain prompt, specialists, KG, per-source RAG, physics_checks, reflexion=1, N=1)."
+    flags:
+      prompt_variant: wd_domain_v1
+      specialists_split: true
+      kg_enabled: true
+      per_source_rag_enabled: true
+      physics_checks_enabled: true
+      reflexion_max_iters: 1
+      best_of_n: 1
+
+  - id: loo_prompt_legacy
+    description: "Leave-one-out: legacy short prompts (no wd_domain layered scaffolding)."
+    flags:
+      prompt_variant: legacy
+      specialists_split: true
+      kg_enabled: true
+      per_source_rag_enabled: true
+      physics_checks_enabled: true
+      reflexion_max_iters: 1
+      best_of_n: 1
+
+  - id: loo_specialists_off
+    description: "Monolithic single drafter (no physicist/writer/critic split)."
+    flags:
+      prompt_variant: wd_domain_v1
+      specialists_split: false
+      kg_enabled: true
+      per_source_rag_enabled: true
+      physics_checks_enabled: true
+      reflexion_max_iters: 1
+      best_of_n: 1
+
+  - id: loo_kg_off
+    description: "Skip KG navigator + KG block in evidence."
+    flags:
+      prompt_variant: wd_domain_v1
+      specialists_split: true
+      kg_enabled: false
+      per_source_rag_enabled: true
+      physics_checks_enabled: true
+      reflexion_max_iters: 1
+      best_of_n: 1
+
+  - id: loo_psrag_off
+    description: "Skip per-source SIMBAD-reference RAG block."
+    flags:
+      prompt_variant: wd_domain_v1
+      specialists_split: true
+      kg_enabled: true
+      per_source_rag_enabled: false
+      physics_checks_enabled: true
+      reflexion_max_iters: 1
+      best_of_n: 1
+
+  - id: loo_physics_off
+    description: "Skip physics_checks (Rayleigh-Jeans / Ingress / Tidal / Mass-Lum)."
+    flags:
+      prompt_variant: wd_domain_v1
+      specialists_split: true
+      kg_enabled: true
+      per_source_rag_enabled: true
+      physics_checks_enabled: false
+      reflexion_max_iters: 1
+      best_of_n: 1
+
+  - id: loo_reflexion_off
+    description: "Disable reflexion loop entirely."
+    flags:
+      prompt_variant: wd_domain_v1
+      specialists_split: true
+      kg_enabled: true
+      per_source_rag_enabled: true
+      physics_checks_enabled: true
+      reflexion_max_iters: 0
+      best_of_n: 1
+
+  - id: loo_bon_off
+    description: "Force best-of-N=1 (always-on baseline; same as baseline but kept explicit)."
+    flags:
+      prompt_variant: wd_domain_v1
+      specialists_split: true
+      kg_enabled: true
+      per_source_rag_enabled: true
+      physics_checks_enabled: true
+      reflexion_max_iters: 1
+      best_of_n: 1
+
+  # Reflexion sweep
+  - id: refl_0
+    description: "Reflexion 0 rounds."
+    flags: {prompt_variant: wd_domain_v1, specialists_split: true, kg_enabled: true, per_source_rag_enabled: true, physics_checks_enabled: true, reflexion_max_iters: 0, best_of_n: 1}
+  - id: refl_1
+    description: "Reflexion 1 round (= baseline)."
+    flags: {prompt_variant: wd_domain_v1, specialists_split: true, kg_enabled: true, per_source_rag_enabled: true, physics_checks_enabled: true, reflexion_max_iters: 1, best_of_n: 1}
+  - id: refl_2
+    description: "Reflexion 2 rounds."
+    flags: {prompt_variant: wd_domain_v1, specialists_split: true, kg_enabled: true, per_source_rag_enabled: true, physics_checks_enabled: true, reflexion_max_iters: 2, best_of_n: 1}
+  - id: refl_3
+    description: "Reflexion 3 rounds."
+    flags: {prompt_variant: wd_domain_v1, specialists_split: true, kg_enabled: true, per_source_rag_enabled: true, physics_checks_enabled: true, reflexion_max_iters: 3, best_of_n: 1}
+
+  # Best-of-N
+  - id: bon_n4
+    description: "Best-of-N=4 (requires reward model trained)."
+    flags: {prompt_variant: wd_domain_v1, specialists_split: true, kg_enabled: true, per_source_rag_enabled: true, physics_checks_enabled: true, reflexion_max_iters: 1, best_of_n: 4}

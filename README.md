@@ -1,186 +1,162 @@
-# Astro Agent — 天文智能分析与知识图谱平台
+# Astro Agent
 
-> 面向天文学研究的综合智能平台，集成**多源数据工具箱**、**论文分析 Agent** 与**知识图谱构建**三大核心能力。
+Astro Agent is an astronomy research agent workspace that combines three pieces:
 
----
+- `Astro_Agent/analysis_agent`: a LangGraph-style scientific analysis agent for source research, evidence collection, QA, and manuscript drafting.
+- `Astro_Agent/astro_toolbox`: survey and modeling tools for spectra, photometry, light curves, SEDs, white-dwarf checks, binaries, extinction, and traceback analysis.
+- `graph_for_astronomy`: an astronomy knowledge-graph pipeline adapted from Prompt2Graph, with staged extraction, entity deduplication, community detection, and optional Neo4j import.
 
-## 项目简介
+The repository is designed for code, prompts, configs, and reproducible scripts. Private `.env` files, downloaded papers, FITS products, SQLite indexes, local outputs, and personal reports are intentionally excluded from version control.
 
-Astro Agent 是一个专为天体物理研究设计的智能工具平台，旨在打通**数据获取 → 分析计算 → 知识沉淀**的全链路：
+## What Is New
 
-- **数据层**：统一查询数十个天文数据库（DESI、Gaia、SDSS、HST、JWST 等）
-- **分析层**：LLM 驱动的论文解读、光谱分析、参数计算 Agent
-- **知识层**：从文献自动抽取天文知识图谱，支持社区发现与可视化
+- Expanded Chief Investigator workflow with source research, per-source RAG, evidence manifests, physics checks, novelty detection, reflexion, workflow tracing, and paper QC.
+- Added PaperOrchestra support for outline, plotting, literature review, section writing, refinement, LaTeX compilation, figures, comparison tables, and final QA.
+- Added new astro toolbox modules for binary orbit estimates, cluster membership, compact-binary reporting, disk-eclipse MCMC, extinction, ingress measurement, decoupled SED fitting, and stellar templates.
+- Added prompt tuning, ablation, prompt verification, and Codex review helper scripts.
+- Updated web UI and service scripts for local interactive runs.
 
----
+## Repository Layout
 
-## 核心模块
-
-### 1. Astro Agent / `analysis_agent`
-
-天文论文智能分析 Agent，基于多节点工作流编排：
-
-| 能力 | 说明 |
-|------|------|
-| `paper_orchestra` | 论文阅读与结构化解析 |
-| `source_research_pipeline` | 源研究自动调研（SIMBAD、ADS、RAG 检索） |
-| `llm_client` | 多模型统一接入（OpenAI、DeepSeek、Kimi） |
-| `workflow` | LangGraph 状态机工作流 |
-| `nodes/*` | 专用节点：Claude Code 诊断、代码审查、补丁评审、QA 门禁 |
-
-**入口**：`analysis_agent/cli.py`、`analysis_agent/server.py`
-
-### 2. Astro Toolbox / `astro_toolbox`
-
-天文数据查询与处理工具箱，覆盖主流巡天与观测设施：
-
-| 设施 | 功能 |
-|------|------|
-| `desi.py` | DESI 光谱查询与处理 |
-| `gaia_lc.py` | Gaia 光变曲线 |
-| `sdss.py` | SDSS 光谱与成像 |
-| `hst.py` / `jwst.py` | 空间望远镜数据下载 |
-| `kepler.py` / `tess.py` | 时域测光数据 |
-| `lamost.py` | LAMOST 光谱 |
-| `koa.py` | Keck 观测档案 |
-| `ztf.py` | ZTF 暂现源 |
-| `galex.py` / `wise.py` / `twomass.py` | 多波段测光 |
-| `xray.py` | X 射线数据 |
-| `sed.py` | 光谱能量分布拟合 |
-| `hr_diagram.py` | 赫罗图绘制 |
-| `orbit_traceback.py` | 轨道回溯 |
-| `rv_fitting.py` / `rv_correction.py` | 视向速度拟合与改正 |
-| `period_analysis.py` | 周期分析 |
-| `wd_fitting.py` / `cooling_age.py` | 白矮星拟合与冷却年龄 |
-| `six_dim.py` | 六维相空间分析 |
-
-**入口**：`astro_toolbox/gui.py`（GUI）、`run_single_target_all_tools.py`（批量）
-
-### 3. Graph for Astronomy / `graph_for_astronomy`
-
-天文领域知识图谱自动构建工具（原 Prompt2Graph 天文适配版）：
-
-- **端到端管线**：从 `corpus_cleaned.json` 一键生成知识图谱
-- **Schema 引导抽取**：自定义天文实体类型（Star、Galaxy、Nebula、Telescope 等）
-- **多阶段 LLM 抽取**：实体识别 → 关系抽取 → 属性抽取 → 可选验证
-- **实体消歧**：自动合并同义实体与缩写
-- **社区聚类**：Leiden / TreeComm 算法发现文献主题社区
-- **质量评估**：LLM 多维打分
-- **Neo4j 导入**：图数据库交互式查询
-- **前端可视化**：轻量 HTML 本地预览
-
-**入口**：`graph_for_astronomy/run_end2end_pipeline.py`
-
----
-
-## 目录结构
-
-```
-Astro_Agent/
-├── analysis_agent/          # 论文分析 Agent
-│   ├── nodes/               # 工作流节点
-│   ├── skills/              # 技能定义
-│   ├── cli.py               # 命令行入口
-│   ├── server.py            # 服务入口
-│   └── workflow.py          # 工作流编排
-├── astro_toolbox/           # 天文数据工具箱
-│   ├── desi.py, gaia_lc.py, sdss.py, hst.py, jwst.py, ...
-│   ├── gui.py               # 图形界面
-│   └── config.py            # 全局配置
-├── claude_code_toolbox/     # Claude Code 封装
-├── configs/                 # 配置文件
-├── desi_tool/               # DESI 专用工具
-├── scripts/                 # 辅助脚本
-├── templates/               # 论文模板（LaTeX）
-├── web/                     # Web 界面
-└── USAGE.md                 # 使用文档
-
-graph_for_astronomy/         # 天文知识图谱构建
-├── configs/                 # 管线 YAML 配置
-├── docs/                    # 设计文档
-├── frontend/                # 可视化前端
-├── graph_tools/             # 图谱工具函数
-├── prompts/                 # Prompt 模板
-│   └── staged/              # 多阶段抽取模板
-├── scorers/                 # 质量打分
-├── staged_extraction/       # 多阶段抽取实现
-├── utils/                   # 公共工具
-├── build_white_dwarf_kg.py  # 白矮星 KG 构建
-├── community_clustering.py  # 社区聚类
-├── entity_deduplication.py  # 实体消歧
-├── graph_builder.py         # 图谱构建器
-├── graph_merger.py          # 图谱合并
-├── graph_to_neo4j.py        # Neo4j 导入
-├── meta_graph_builder.py    # 元图谱构建
-├── prompt2graph.py          # 底层主入口
-├── run_end2end_pipeline.py  # 【推荐】端到端入口
-├── run_frontend_server.py   # 前端服务
-└── README.md                # 模块文档
+```text
+.
+├── Astro_Agent/
+│   ├── analysis_agent/          # agent workflow, LLM clients, QA, paper pipeline
+│   ├── astro_toolbox/           # astronomy data and modeling toolbox
+│   ├── claude_code_toolbox/     # optional Claude Code subprocess wrapper
+│   ├── scripts/                 # review, ablation, prompt tuning, helper scripts
+│   ├── web/                     # local web UI
+│   └── USAGE.md                 # longer usage notes
+├── graph_for_astronomy/         # astronomy KG extraction and visualization
+├── rag_pipeline/                # local RAG utilities and docs
+├── start_services.sh            # local service launcher
+├── stop_services.sh             # local service stopper
+└── README.md
 ```
 
----
+## Setup
 
-## 快速开始
-
-### 环境准备
+Use Python 3.10 or newer. Create an environment from the repository root:
 
 ```bash
-# Python 3.10+
-pip install -r requirements.txt
+python3 -m venv .venv
+source .venv/bin/activate
+python -m pip install --upgrade pip
+python -m pip install numpy pandas scipy matplotlib astropy astroquery requests python-dotenv pyyaml networkx fastapi uvicorn
+python -m pip install openai langgraph neo4j json-repair scikit-learn
 ```
 
-> 核心依赖：`openai`, `langgraph`, `networkx`, `neo4j`, `leidenalg`, `astropy`, `astroquery`, `numpy`, `pandas`, `matplotlib`
-
-### 配置环境变量
-
-复制对应模块的 `.env.example` 为 `.env`，填入 API Key：
+Optional packages depend on what you run:
 
 ```bash
-cp Astro_Agent/.env.example Astro_Agent/.env
+python -m pip install lightkurve galpy dustmaps emcee corner
+python -m pip install python-igraph leidenalg sentence-transformers
+```
+
+## Private Configuration
+
+Do not commit real API keys. Copy one of the examples and edit it locally:
+
+```bash
+cp Astro_Agent/analysis_agent/.env.example Astro_Agent/analysis_agent/.env
+cp Astro_Agent/astro_toolbox/.env.example Astro_Agent/astro_toolbox/.env
 cp graph_for_astronomy/.env.example graph_for_astronomy/.env
 ```
 
-### 运行工具箱
+Common variables:
 
-```bash
-# 单目标全工具查询
-python Astro_Agent/astro_toolbox/run_single_target_all_tools.py
+```text
+ASTRO_AGENT_MODEL_PROVIDER=deepseek
+DEEPSEEK_BASE_URL=https://api.deepseek.com
+DEEPSEEK_MODEL=deepseek-v4-pro
+DEEPSEEK_API_KEY=your_private_key_here
 
-# 启动 GUI
-python Astro_Agent/astro_toolbox/gui.py
+ADS_DEV_KEY=your_private_ads_key_here
+GAIA_TOKEN=your_private_gaia_token_here
+LAMOST_TOKEN=your_private_lamost_token_here
 ```
 
-### 运行 Agent
+The root `.gitignore` excludes `.env`, local outputs, downloaded data, databases, PDFs, FITS files, logs, and local personal reports.
+
+## Run The Agent
+
+Dry-run a target without downloading survey products:
 
 ```bash
-# 命令行模式
-python Astro_Agent/analysis_agent/cli.py
-
-# 服务化启动
-python Astro_Agent/analysis_agent/server.py
+python -m Astro_Agent.analysis_agent.cli "Gaia DR3 865415642195374464" --ra 232.3955 --dec 29.4672
 ```
 
-### 运行知识图谱管线
+Run the toolbox-backed analysis:
 
 ```bash
-# 准备语料：graph_for_astronomy/input/astronomy/corpus_cleaned.json
-# 修改配置：graph_for_astronomy/configs/simple_pipeline.yml
+python -m Astro_Agent.analysis_agent.cli "Gaia DR3 865415642195374464" --ra 232.3955 --dec 29.4672 --execute
+```
 
+Run with an LLM-backed writing/review pass:
+
+```bash
+python -m Astro_Agent.analysis_agent.cli "Gaia DR3 865415642195374464" --ra 232.3955 --dec 29.4672 --execute --use-llm --llm-provider deepseek
+```
+
+Start the local HTTP service and web UI:
+
+```bash
+python -m uvicorn Astro_Agent.analysis_agent.server:app --host 0.0.0.0 --port 8765 --reload
+```
+
+Then open `http://localhost:8765/`.
+
+## Run The Astro Toolbox
+
+```bash
+python -m Astro_Agent.astro_toolbox.run_single_target_all_tools
+```
+
+Or import modules directly:
+
+```python
+from Astro_Agent.astro_toolbox import sdss, ztf, sed
+
+ra, dec = 190.305, 2.596
+spec = sdss.query_spectrum(ra, dec)
+lc = ztf.query_lightcurve(ra, dec)
+
+fitter = sed.SEDFitter(ra, dec)
+fitter.collect_photometry()
+fitter.apply_extinction()
+```
+
+Outputs and caches are written under ignored local directories such as `Astro_Agent/output/`, `Astro_Agent/data/`, and toolbox cache folders.
+
+## Run The Knowledge Graph Pipeline
+
+Prepare a local corpus JSON and keep large input/output data out of Git:
+
+```text
+graph_for_astronomy/input/<dataset>/corpus_cleaned.json
+```
+
+Run a pipeline config:
+
+```bash
 python graph_for_astronomy/run_end2end_pipeline.py graph_for_astronomy/configs/simple_pipeline.yml
 ```
 
----
+Outputs are written under `graph_for_astronomy/output/`, which is ignored.
 
-## 注意事项
+## Safety Checklist Before Pushing
 
-1. **不要上传 `.env` 文件** — 已加入 `.gitignore`，内含 API Key 与数据库密码
-2. **大文件已排除** — `output/`、`cache/`、`data/`、`.fits`、`.sqlite`、`.h5` 等不会进入版本控制
-3. **工具箱依赖外部数据接口** — 部分功能需要网络连接与天文数据库账号（如 KOA、MAST）
-4. **LLM 调用计费** — Agent 与知识图谱管线涉及多次 LLM API 调用，大批量运行前请估算 token 消耗
-5. **知识图谱首次运行建议** — 先用 1–2 篇短文测试 `simple_pipeline.yml`，确认 Schema 与 Prompt 效果后再跑大批量文献
+Before publishing changes, run:
 
----
+```bash
+git status --short
+git ls-files --others --exclude-standard
+rg -n "sk-[A-Za-z0-9_-]{20,}|BEGIN .*PRIVATE KEY|password\\s*=" -g '!**/.git/**' -g '!**/.env' .
+find . -path './.git' -prune -o -type f -size +50M -print
+```
 
-## 许可证
+Only code, public prompts, public configs, docs, and lightweight examples should be committed. Keep `.env`, PDFs, FITS files, SQLite indexes, large KG outputs, private technical reports, and generated run artifacts local.
 
-内部研究使用，请遵守相关数据合规与 API 服务条款。
+## License
+
+Research use. Respect the terms of the external data services and model providers you configure locally.

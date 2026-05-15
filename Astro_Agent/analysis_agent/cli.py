@@ -113,6 +113,11 @@ def parse_args() -> argparse.Namespace:
         help="Seconds to wait for a Claude Code delegation before recording failure and continuing; default: 300.",
     )
     parser.add_argument(
+        "--claude-permission-mode",
+        default="plan",
+        help="Permission mode passed to Claude Code; default: plan.",
+    )
+    parser.add_argument(
         "--max-supervision-rounds",
         type=int,
         default=2,
@@ -147,6 +152,7 @@ def main() -> None:
         download_simbad_pdfs=args.download_simbad_pdfs,
         enable_claude_code=args.enable_claude_code,
         claude_timeout=args.claude_timeout,
+        claude_permission_mode=args.claude_permission_mode,
         max_supervision_rounds=args.max_supervision_rounds,
     )
     if args.json:

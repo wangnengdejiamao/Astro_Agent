@@ -126,8 +126,12 @@ class ClaudeCodeClient:
 
         stdout = raw.get("stdout", "") or ""
         stderr = raw.get("stderr", "") or ""
+        payload = self._extract_payload(stdout)
 
         changed = extract_changed_files(stdout)
+        if isinstance(payload.get("changed_files"), list):
+            changed.extend(str(path) for path in payload.get("changed_files", []))
+        changed = list(dict.fromkeys(changed))
         # filter writes the policy would block
         risky = [p for p in changed if self.policy.is_denied(p)]
         changed_clean = [p for p in changed if not self.policy.is_denied(p)]
@@ -140,13 +144,19 @@ class ClaudeCodeClient:
             status = ClaudeCodeStatus.NEEDS_REVIEW
 
         summary = self._extract_summary(stdout) or stderr[-400:]
+        tests = [str(item) for item in payload.get("tests", [])] if isinstance(payload.get("tests"), list) else []
+        docs = [str(item) for item in payload.get("docs", [])] if isinstance(payload.get("docs"), list) else []
+        patch_summary = payload.get("implementation_summary") or payload.get("patch_summary")
 
         return ClaudeCodeResult(
             task_id=task.task_id,
             type=task.type,
             status=status,
             summary=summary,
+            patch_summary=str(patch_summary) if patch_summary else None,
             changed_files=changed_clean,
+            tests=tests,
+            docs=docs,
             risks=risks,
             raw_output_path=str(raw_path),
             raw_stdout=stdout[-4000:],
@@ -169,6 +179,26 @@ class ClaudeCodeClient:
         except Exception:
             pass
         return stdout.strip()[:1200]
+
+    @staticmethod
+    def _extract_payload(stdout: str) -> Dict[str, Any]:
+        if not stdout:
+            return {}
+        try:
+            data = json.loads(stdout)
+            if not isinstance(data, dict):
+                return {}
+            nested = data.get("result")
+            if isinstance(nested, str):
+                try:
+                    nested_data = json.loads(nested)
+                    if isinstance(nested_data, dict):
+                        return nested_data
+                except Exception:
+                    pass
+            return data
+        except Exception:
+            return {}
 
 
 def make_default_client(run_id: Optional[str] = None) -> ClaudeCodeClient:
