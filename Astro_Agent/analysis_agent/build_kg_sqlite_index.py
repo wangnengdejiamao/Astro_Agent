@@ -9,21 +9,16 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sqlite3
 from pathlib import Path
 from typing import Any
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_KG_JSON = (
-    REPO_ROOT
-    / "graph_for_astronomy"
-    / "output"
-    / "white_dwarf_kg"
-    / "production_full"
-    / "multi_stage_deduplicated.json"
-)
-DEFAULT_DB = REPO_ROOT / "graph_for_astronomy" / "output" / "white_dwarf_kg" / "kg_index.sqlite"
+KG_WORKSPACE = Path(os.getenv("ASTRO_AGENT_KG_WORKSPACE", str(REPO_ROOT / ".local_kg")))
+DEFAULT_KG_JSON = KG_WORKSPACE / "output" / "white_dwarf_kg" / "production_full" / "multi_stage_deduplicated.json"
+DEFAULT_DB = KG_WORKSPACE / "output" / "white_dwarf_kg" / "kg_index.sqlite"
 
 
 def node_name(node: dict[str, Any] | None) -> str:

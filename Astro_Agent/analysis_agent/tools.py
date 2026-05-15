@@ -20,21 +20,9 @@ ASTRO_AGENT_DIR = PACKAGE_DIR.parent
 REPO_ROOT = ASTRO_AGENT_DIR.parent
 ASTRO_TOOLBOX_DIR = ASTRO_AGENT_DIR / "astro_toolbox"
 RAG_DB = REPO_ROOT / "rag_pipeline" / "index" / "white_dwarf_rag.sqlite"
-KG_JSON = (
-    REPO_ROOT
-    / "graph_for_astronomy"
-    / "output"
-    / "white_dwarf_kg"
-    / "production_full"
-    / "multi_stage_deduplicated.json"
-)
-KG_INDEX = (
-    REPO_ROOT
-    / "graph_for_astronomy"
-    / "output"
-    / "white_dwarf_kg"
-    / "kg_index.sqlite"
-)
+KG_WORKSPACE = Path(os.getenv("ASTRO_AGENT_KG_WORKSPACE", str(REPO_ROOT / ".local_kg")))
+KG_JSON = KG_WORKSPACE / "output" / "white_dwarf_kg" / "production_full" / "multi_stage_deduplicated.json"
+KG_INDEX = KG_WORKSPACE / "output" / "white_dwarf_kg" / "kg_index.sqlite"
 
 os.environ.setdefault("MPLCONFIGDIR", "/tmp/matplotlib")
 

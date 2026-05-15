@@ -18,11 +18,11 @@ from pathlib import Path
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-P2G_ROOT = REPO_ROOT / "graph_for_astronomy"
+KG_WORKSPACE = Path(os.getenv("ASTRO_AGENT_KG_WORKSPACE", str(REPO_ROOT / ".local_kg")))
 RAG_DB = REPO_ROOT / "rag_pipeline" / "index" / "white_dwarf_rag.sqlite"
-CORPUS_DIR = P2G_ROOT / "input" / "white_dwarf_kg_deepseek"
+CORPUS_DIR = KG_WORKSPACE / "input" / "white_dwarf_kg_deepseek"
 CORPUS_PATH = CORPUS_DIR / "corpus_cleaned.json"
-CONFIG = P2G_ROOT / "configs" / "white_dwarf_kg_deepseek_stage123.yml"
+CONFIG = KG_WORKSPACE / "configs" / "white_dwarf_kg_deepseek_stage123.yml"
 
 
 def require_env() -> None:
@@ -84,8 +84,8 @@ def run_pipeline(output_dir: Path, limit_chunks: int | None = None) -> int:
     # run_pipeline_by_stage is better for an explicit existing chunks directory,
     # but the end-to-end script performs chunking and clustering in one call.
     env = os.environ.copy()
-    env["PROJECT_DIR"] = str(P2G_ROOT)
-    proc = subprocess.run(cmd, cwd=str(P2G_ROOT), env=env, text=True)
+    env["PROJECT_DIR"] = str(KG_WORKSPACE)
+    proc = subprocess.run(cmd, cwd=str(KG_WORKSPACE), env=env, text=True)
     return proc.returncode
 
 
@@ -96,7 +96,7 @@ def main() -> None:
     args = parser.parse_args()
     require_env()
     summary = build_corpus(limit_papers=args.limit_papers)
-    run_root = P2G_ROOT / "output" / "white_dwarf_kg" / f"deepseek_stage123_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
+    run_root = KG_WORKSPACE / "output" / "white_dwarf_kg" / f"deepseek_stage123_{datetime.utcnow().strftime('%Y%m%d_%H%M%S')}"
     summary["planned_output_root"] = str(run_root)
     print(json.dumps(summary, ensure_ascii=False, indent=2))
     if not args.prepare_only:

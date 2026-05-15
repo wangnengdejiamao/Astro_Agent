@@ -45,7 +45,8 @@ REPO_ROOT = Path(__file__).resolve().parents[2]
 ASTRO_AGENT_DIR = REPO_ROOT / "Astro_Agent"
 ASTRO_TOOLBOX_DIR = ASTRO_AGENT_DIR / "astro_toolbox"
 RAG_DB = REPO_ROOT / "rag_pipeline" / "index" / "white_dwarf_rag.sqlite"
-KG_INDEX = REPO_ROOT / "graph_for_astronomy" / "output" / "white_dwarf_kg" / "kg_index.sqlite"
+KG_WORKSPACE = Path(os.getenv("ASTRO_AGENT_KG_WORKSPACE", str(REPO_ROOT / ".local_kg")))
+KG_INDEX = KG_WORKSPACE / "output" / "white_dwarf_kg" / "kg_index.sqlite"
 METADATA_JSON = REPO_ROOT / "literature" / "ads_complete_20260416" / "COMPLETE_DATASET.json"
 PDF_DIR = REPO_ROOT / "literature" / "pdfs"
 

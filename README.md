@@ -1,12 +1,11 @@
 # Astro Agent
 
-Astro Agent is an astronomy research agent workspace that combines three pieces:
+Astro Agent is an astronomy research agent workspace that combines two public pieces:
 
 - `Astro_Agent/analysis_agent`: a LangGraph-style scientific analysis agent for source research, evidence collection, QA, and manuscript drafting.
 - `Astro_Agent/astro_toolbox`: survey and modeling tools for spectra, photometry, light curves, SEDs, white-dwarf checks, binaries, extinction, and traceback analysis.
-- `graph_for_astronomy`: an astronomy knowledge-graph pipeline adapted from Prompt2Graph, with staged extraction, entity deduplication, community detection, and optional Neo4j import.
 
-The repository is designed for code, prompts, configs, and reproducible scripts. Private `.env` files, downloaded papers, FITS products, SQLite indexes, local outputs, and personal reports are intentionally excluded from version control.
+The repository is designed for code, prompts, configs, and reproducible scripts. Private `.env` files, downloaded papers, FITS products, SQLite indexes, local outputs, local knowledge-graph workspaces, and personal reports are intentionally excluded from version control.
 
 ## What Is New
 
@@ -15,6 +14,17 @@ The repository is designed for code, prompts, configs, and reproducible scripts.
 - Added new astro toolbox modules for binary orbit estimates, cluster membership, compact-binary reporting, disk-eclipse MCMC, extinction, ingress measurement, decoupled SED fitting, and stellar templates.
 - Added prompt tuning, ablation, prompt verification, and Codex review helper scripts.
 - Updated web UI and service scripts for local interactive runs.
+
+## Workflow
+
+1. Resolve a target name or RA/Dec and cross-check identity with public astronomy services.
+2. Fetch or reuse local survey products: spectra, photometry, light curves, SED inputs, astrometry, and archive metadata.
+3. Run toolbox modules for data quality checks, SED/HRD evidence, binary/orbit estimates, period/RV checks, extinction, and source-specific diagnostics.
+4. Search local RAG and a private local KG index for comparable papers and reusable methods.
+5. Build an evidence manifest, run physics/consistency checks, then draft or hold the paper depending on QA status.
+6. Use review, ablation, prompt-tuning, and Codex-review scripts to improve prompts, tools, and workflow behavior.
+
+The KG is not shipped in this public repository. Users should privately collect papers, convert them into a local corpus, run their own extraction pipeline, build a local SQLite/JSON index, and point the agent to it with `ASTRO_AGENT_KG_WORKSPACE`.
 
 ## Repository Layout
 
@@ -27,7 +37,6 @@ The repository is designed for code, prompts, configs, and reproducible scripts.
 │   ├── scripts/                 # review, ablation, prompt tuning, helper scripts
 │   ├── web/                     # local web UI
 │   └── USAGE.md                 # longer usage notes
-├── graph_for_astronomy/         # astronomy KG extraction and visualization
 ├── rag_pipeline/                # local RAG utilities and docs
 ├── start_services.sh            # local service launcher
 ├── stop_services.sh             # local service stopper
@@ -60,7 +69,6 @@ Do not commit real API keys. Copy one of the examples and edit it locally:
 ```bash
 cp Astro_Agent/analysis_agent/.env.example Astro_Agent/analysis_agent/.env
 cp Astro_Agent/astro_toolbox/.env.example Astro_Agent/astro_toolbox/.env
-cp graph_for_astronomy/.env.example graph_for_astronomy/.env
 ```
 
 Common variables:
@@ -74,9 +82,10 @@ DEEPSEEK_API_KEY=your_private_key_here
 ADS_DEV_KEY=your_private_ads_key_here
 GAIA_TOKEN=your_private_gaia_token_here
 LAMOST_TOKEN=your_private_lamost_token_here
+ASTRO_AGENT_KG_WORKSPACE=/absolute/path/to/private/kg_workspace
 ```
 
-The root `.gitignore` excludes `.env`, local outputs, downloaded data, databases, PDFs, FITS files, logs, and local personal reports.
+The root `.gitignore` excludes `.env`, local outputs, downloaded data, databases, PDFs, FITS files, logs, local knowledge-graph workspaces, and local personal reports.
 
 ## Run The Agent
 
@@ -128,21 +137,15 @@ fitter.apply_extinction()
 
 Outputs and caches are written under ignored local directories such as `Astro_Agent/output/`, `Astro_Agent/data/`, and toolbox cache folders.
 
-## Run The Knowledge Graph Pipeline
+## Data, Tools, And Attribution
 
-Prepare a local corpus JSON and keep large input/output data out of Git:
+This repository provides orchestration code and does not redistribute third-party survey data. If you use downloaded products or generated figures in a paper, cite the original data providers and follow their terms.
 
-```text
-graph_for_astronomy/input/<dataset>/corpus_cleaned.json
-```
+Common upstream astronomy services used by the toolbox include SIMBAD/CDS, VizieR, NASA ADS, Gaia, SDSS, DESI, MAST archives for HST/JWST/TESS/Kepler, ZTF, WISE, 2MASS, GALEX, LAMOST, KOA/Keck, GALAH, and related public catalogs.
 
-Run a pipeline config:
+Core software dependencies include Python, Astropy, Astroquery, NumPy, SciPy, Pandas, Matplotlib, NetworkX, FastAPI/Uvicorn, LangGraph, OpenAI-compatible API clients, and optional packages such as Lightkurve, Galpy, Dustmaps, emcee, corner, python-igraph, Leidenalg, SentenceTransformers, and Neo4j.
 
-```bash
-python graph_for_astronomy/run_end2end_pipeline.py graph_for_astronomy/configs/simple_pipeline.yml
-```
-
-Outputs are written under `graph_for_astronomy/output/`, which is ignored.
+LLM providers, archive credentials, and private corpora stay in local `.env` files or ignored workspaces. Do not commit API keys, raw papers, FITS files, SQLite indexes, or generated KG outputs.
 
 ## Safety Checklist Before Pushing
 
@@ -155,7 +158,7 @@ rg -n "sk-[A-Za-z0-9_-]{20,}|BEGIN .*PRIVATE KEY|password\\s*=" -g '!**/.git/**'
 find . -path './.git' -prune -o -type f -size +50M -print
 ```
 
-Only code, public prompts, public configs, docs, and lightweight examples should be committed. Keep `.env`, PDFs, FITS files, SQLite indexes, large KG outputs, private technical reports, and generated run artifacts local.
+Only code, public prompts, public configs, docs, and lightweight examples should be committed. Keep `.env`, PDFs, FITS files, SQLite indexes, local knowledge-graph workspaces, private technical reports, and generated run artifacts local.
 
 ## License
 

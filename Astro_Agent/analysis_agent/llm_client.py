@@ -51,10 +51,11 @@ def load_dotenv_files(*paths: Path) -> list[str]:
 
 
 def load_default_env() -> list[str]:
+    kg_workspace = Path(os.getenv("ASTRO_AGENT_KG_WORKSPACE", str(REPO_ROOT / ".local_kg")))
     return load_dotenv_files(
         REPO_ROOT / ".env",
         PACKAGE_DIR / ".env",
-        REPO_ROOT / "graph_for_astronomy" / ".env",
+        kg_workspace / ".env",
     )
 
 

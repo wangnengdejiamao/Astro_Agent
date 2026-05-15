@@ -7,7 +7,7 @@
 | 层 | 组件 | 入口 |
 | --- | --- | --- |
 | 工具层 | `astro_toolbox/` 30+ 模块（SDSS/DESI/LAMOST/KOA/HST/JWST/ZTF/WISE/Gaia/SED/HR/WD-fit/cooling-age/period/RV/orbit-traceback) | `python -m astro_toolbox.gui` |
-| 知识层 | RAG: `white_dwarf_rag.sqlite` · KG: `graph_for_astronomy/output/white_dwarf_kg/` (12,740 节点 / 83,782 边) | `tools.search_rag` / `tools.search_kg` |
+| 知识层 | 本地 RAG/KG 索引（不随公开仓库发布） | `tools.search_rag` / `tools.search_kg` |
 | 智能体层 | `analysis_agent/` Chief Investigator (12 个 LangGraph 节点：resolve → data_fetcher → rag/kg navigator → 三次迭代 → qa_gate → drafter (PaperOrchestra 五智能体) → peer_reviewer → toolbox_evolution) | CLI: `python -m analysis_agent.cli` · HTTP: `analysis_agent.server` |
 
 **写文章 / Codex 工具箱已经接入**：

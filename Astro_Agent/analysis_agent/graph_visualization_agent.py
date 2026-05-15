@@ -15,6 +15,7 @@ from __future__ import annotations
 import argparse
 import json
 import math
+import os
 import sqlite3
 from collections import Counter, defaultdict
 from dataclasses import dataclass
@@ -33,8 +34,9 @@ from .llm_client import LLMClient, load_default_env, load_model_config
 
 
 REPO_ROOT = Path(__file__).resolve().parents[2]
-DEFAULT_KG_DB = REPO_ROOT / "graph_for_astronomy" / "output" / "white_dwarf_kg" / "kg_index.sqlite"
-DEFAULT_SUMMARY = REPO_ROOT / "graph_for_astronomy" / "output" / "white_dwarf_kg" / "production_full" / "summary.json"
+KG_WORKSPACE = Path(os.getenv("ASTRO_AGENT_KG_WORKSPACE", str(REPO_ROOT / ".local_kg")))
+DEFAULT_KG_DB = KG_WORKSPACE / "output" / "white_dwarf_kg" / "kg_index.sqlite"
+DEFAULT_SUMMARY = KG_WORKSPACE / "output" / "white_dwarf_kg" / "production_full" / "summary.json"
 DEFAULT_OUT = REPO_ROOT / "Astro_Agent" / "output" / "analysis_agent" / "kg_graph_report"
 
 

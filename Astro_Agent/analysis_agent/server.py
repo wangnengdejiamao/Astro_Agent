@@ -52,7 +52,8 @@ app.add_middleware(
 )
 
 WEB_DIR = ASTRO_AGENT_DIR / "web"
-FRONTEND_DIR = ASTRO_AGENT_DIR.parent / "graph_for_astronomy" / "frontend"
+KG_WORKSPACE = Path(os.getenv("ASTRO_AGENT_KG_WORKSPACE", str(ASTRO_AGENT_DIR.parent / ".local_kg")))
+FRONTEND_DIR = KG_WORKSPACE / "frontend"
 RUNS_DIR = ASTRO_AGENT_DIR / "output" / "analysis_agent"
 
 # AI CLI tools configuration
@@ -215,7 +216,7 @@ def kg_search(req: KgReq):
 
 
 # ---------- KG Graph for Frontend ----------
-KG_OUTPUT_DIR = ASTRO_AGENT_DIR.parent / "graph_for_astronomy" / "output"
+KG_OUTPUT_DIR = KG_WORKSPACE / "output"
 _KG_JSON_CACHE: Dict[str, Dict[str, Any]] = {}
 
 
@@ -1317,4 +1318,3 @@ def get_run_artifact(name: str, filename: str):
     if not target.exists():
         raise HTTPException(404, "not found")
     return FileResponse(str(target))
-
