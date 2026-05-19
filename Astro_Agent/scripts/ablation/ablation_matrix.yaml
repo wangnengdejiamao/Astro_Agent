@@ -139,3 +139,21 @@ configs:
   - id: bon_n4
     description: "Best-of-N=4 (requires reward model trained)."
     flags: {prompt_variant: wd_domain_v1, specialists_split: true, kg_enabled: true, per_source_rag_enabled: true, physics_checks_enabled: true, reflexion_max_iters: 1, best_of_n: 4}
+
+  # D1-D7 generation-side defenses (each LOO turns one defense off; the
+  # baseline above has them all on).
+  - id: loo_evidence_manifest_off
+    description: "Drafter ignores per-section evidence manifest (D1 off)."
+    flags: {prompt_variant: wd_domain_v1, specialists_split: true, kg_enabled: true, per_source_rag_enabled: true, physics_checks_enabled: true, reflexion_max_iters: 1, best_of_n: 1, evidence_manifest_enabled: false}
+  - id: loo_resolver_crosscheck_off
+    description: "Resolver does not crosscheck name vs coords (D2 off)."
+    flags: {prompt_variant: wd_domain_v1, specialists_split: true, kg_enabled: true, per_source_rag_enabled: true, physics_checks_enabled: true, reflexion_max_iters: 1, best_of_n: 1, resolver_crosscheck_enabled: false}
+  - id: loo_failclosed_off
+    description: "extinction + cluster fail-closed disabled (D3+D4 off)."
+    flags: {prompt_variant: wd_domain_v1, specialists_split: true, kg_enabled: true, per_source_rag_enabled: true, physics_checks_enabled: true, reflexion_max_iters: 1, best_of_n: 1, failclosed_enabled: false}
+  - id: loo_bibkey_validator_off
+    description: "Bibkey write-time validator off, refs.bib may contain placeholders (D5 off)."
+    flags: {prompt_variant: wd_domain_v1, specialists_split: true, kg_enabled: true, per_source_rag_enabled: true, physics_checks_enabled: true, reflexion_max_iters: 1, best_of_n: 1, bibkey_validator_enabled: false}
+  - id: loo_structural_lint_off
+    description: "Structural lint disabled; manuscript goes straight to paper_qc (D7 off)."
+    flags: {prompt_variant: wd_domain_v1, specialists_split: true, kg_enabled: true, per_source_rag_enabled: true, physics_checks_enabled: true, reflexion_max_iters: 1, best_of_n: 1, structural_lint_enabled: false}

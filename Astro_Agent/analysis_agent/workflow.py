@@ -1868,6 +1868,13 @@ def reflexion_node(state: AnalysisState) -> AnalysisState:
     """
     qc = state.get("paper_qc") or {}
     reflection = reflexion.build_reflection(qc)
+    # D7 — merge structural-lint pending action items into the reflection
+    # so a manuscript that passes paper_qc but fails structural lint still
+    # triggers a rewrite.
+    pending_lint = state.pop("pending_lint_action_items", None) or []
+    if pending_lint:
+        reflection.setdefault("action_items", []).extend(pending_lint)
+        reflection["structural_lint_added"] = len(pending_lint)
     state["reflexion_history"] = reflexion.append_to_history(state, reflection)
     retry_count = int(state.get("reflexion_retry_count") or 0)
     max_retries = int(state.get("max_reflexion_retries") or 2)
@@ -1875,7 +1882,9 @@ def reflexion_node(state: AnalysisState) -> AnalysisState:
     n_fail = int(qc.get("n_fail") or 0)
     n_warn = int(qc.get("n_warn") or 0)
     has_actionable = bool(reflection.get("action_items"))
-    needs_rewrite = (verdict in ("fail", "warn") or n_fail > 0 or n_warn >= 1)
+    lint_verdict = (state.get("structural_lint") or {}).get("verdict")
+    needs_rewrite = (verdict in ("fail", "warn") or n_fail > 0 or n_warn >= 1
+                     or lint_verdict == "fail")
     if needs_rewrite and has_actionable and retry_count < max_retries:
         state["reflexion_retry_count"] = retry_count + 1
         state["reflexion_decision"] = "rewrite"
@@ -1900,6 +1909,39 @@ def reflexion_node(state: AnalysisState) -> AnalysisState:
 def route_after_reflexion(state: AnalysisState) -> str:
     # Pure reader — node body did the real work.
     return state.get("reflexion_decision") or "accept"
+
+
+def structural_lint_node(state: AnalysisState) -> AnalysisState:
+    """D7 — static post-drafter lint (Codex blocker categories caught at
+    write time, not just QC time). Violations are appended as
+    `action_items` so the existing reflexion loop handles the rewrite."""
+    from .nodes.structural_lint import run_structural_lint, to_reflexion_action_items
+    run_dir = _run_dir(state)
+    paper = state.get("paper") or {}
+    orchestra = state.get("paper_orchestra") or {}
+    final_tex = (
+        paper.get("paper_orchestra_final_tex")
+        or orchestra.get("final_tex")
+        or paper.get("tex")
+    )
+    if not final_tex:
+        state["structural_lint"] = {"verdict": "warn", "reason": "no manuscript"}
+        return state
+    lint = run_structural_lint(
+        manuscript_path=Path(final_tex),
+        bibkey_allowlist=state.get("bibkey_allowlist") or [],
+        evidence_manifest=state.get("evidence_manifest") or {},
+        output_path=run_dir / "09a_structural_lint.json",
+    )
+    state["structural_lint"] = lint
+    _append_artifact(state, str(run_dir / "09a_structural_lint.json"))
+
+    # Surface as reflexion action_items: append to a synthetic
+    # `lint_action_items` in state so reflexion_node merges them in.
+    items = to_reflexion_action_items(lint)
+    if items:
+        state["pending_lint_action_items"] = items
+    return state
 
 
 def paper_qc_node(state: AnalysisState) -> AnalysisState:
@@ -2046,6 +2088,7 @@ def build_graph():
     graph.add_node("figure_synthesizer", figure_synthesizer_node)
     graph.add_node("latex_compile", latex_compile_node)
     graph.add_node("paper_qc", paper_qc_node)
+    graph.add_node("structural_lint", structural_lint_node)
     graph.add_node("reflexion", reflexion_node)
     graph.add_node("peer_reviewer", peer_reviewer_node)
     graph.add_node("kg_writeback", kg_writeback_node)
@@ -2091,7 +2134,8 @@ def build_graph():
     # drafter → figures → latex compile → paper_qc → reflexion
     graph.add_edge("drafter", "figure_synthesizer")
     graph.add_edge("figure_synthesizer", "latex_compile")
-    graph.add_edge("latex_compile", "paper_qc")
+    graph.add_edge("latex_compile", "structural_lint")
+    graph.add_edge("structural_lint", "paper_qc")
     # Paper QC -> Reflexion -> [back to drafter for targeted rewrite] or peer_reviewer
     graph.add_edge("paper_qc", "reflexion")
     graph.add_conditional_edges(
