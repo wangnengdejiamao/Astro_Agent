@@ -190,6 +190,18 @@ def _safe_float(value, default=np.nan):
         return default
 
 
+def _old_text(row, key):
+    value = row.get(key, '')
+    if value is None:
+        return ''
+    try:
+        if pd.isna(value):
+            return ''
+    except Exception:
+        pass
+    return str(value)
+
+
 def _lris_arm_from_metadata(koaid, instrume=''):
     koaid = str(koaid or '').strip().upper()
     instrume = str(instrume or '').strip().upper()
@@ -390,6 +402,173 @@ def _spec2d_files(root):
     return sorted({os.path.abspath(path) for path in paths if os.path.isfile(path)})
 
 
+def _usable_spectrum_result(result, min_points=50, min_wave_span=50.0):
+    if not result:
+        return False
+    try:
+        wave = np.asarray(result.get('wavelength', []), dtype=float)
+    except Exception:
+        return False
+    good = np.isfinite(wave) & (wave > 0)
+    if int(np.count_nonzero(good)) < int(min_points):
+        return False
+    span = float(np.nanmax(wave[good]) - np.nanmin(wave[good]))
+    return np.isfinite(span) and span >= float(min_wave_span)
+
+
+def _standard_spectrum_csv_stats(csv_path, min_points=50, min_wave_span=50.0):
+    if not csv_path or not os.path.exists(csv_path):
+        return None
+    try:
+        table = pd.read_csv(csv_path)
+    except Exception as exc:
+        return {
+            'valid': False,
+            'reason': f'unreadable CSV: {type(exc).__name__}: {exc}',
+            'n_points': 0,
+            'wave_span': np.nan,
+        }
+
+    names = {str(col).lower(): col for col in table.columns}
+    wave_col = (names.get('wavelength_a') or names.get('wavelength')
+                or names.get('wave') or names.get('lambda')
+                or names.get('wavelength_angstrom'))
+    flux_col = names.get('flux') or names.get('flam') or names.get('counts')
+    if wave_col is None or flux_col is None:
+        return {
+            'valid': False,
+            'reason': 'missing wavelength or flux column',
+            'n_points': 0,
+            'wave_span': np.nan,
+        }
+
+    wave = pd.to_numeric(table[wave_col], errors='coerce').to_numpy(float)
+    flux = pd.to_numeric(table[flux_col], errors='coerce').to_numpy(float)
+    good = np.isfinite(wave) & np.isfinite(flux) & (wave > 0)
+    n_points = int(np.count_nonzero(good))
+    if n_points:
+        wmin = float(np.nanmin(wave[good]))
+        wmax = float(np.nanmax(wave[good]))
+        wave_span = wmax - wmin
+    else:
+        wmin = wmax = wave_span = np.nan
+    valid = n_points >= int(min_points) and np.isfinite(wave_span) and (
+        wave_span >= float(min_wave_span))
+    reason = '' if valid else (
+        f'too few usable samples or wavelength span: '
+        f'n={n_points}, span={wave_span:.3f} A')
+    return {
+        'valid': bool(valid),
+        'reason': reason,
+        'n_points': n_points,
+        'wave_min': wmin,
+        'wave_max': wmax,
+        'wave_span': wave_span,
+    }
+
+
+def _archive_invalid_standard_spectrum(target_dir, reason=''):
+    spectrum_dir = os.path.join(target_dir, 'spectrum')
+    csv_path = os.path.join(spectrum_dir, 'koa_spectrum.csv')
+    stats = _standard_spectrum_csv_stats(csv_path)
+    if stats is None or stats.get('valid'):
+        return {}
+
+    stamp = time.strftime('%Y%m%dT%H%M%S')
+    reject_dir = os.path.join(spectrum_dir, 'rejected', stamp)
+    utils.ensure_dir(reject_dir)
+    moved = []
+    for name in (
+            'koa_spectrum.csv',
+            'koa_spectrum.png',
+            'koa_spectrum_report.txt',
+            'koa_exposures.csv'):
+        src = os.path.join(spectrum_dir, name)
+        if not os.path.exists(src):
+            continue
+        dst = os.path.join(reject_dir, name)
+        if os.path.exists(dst):
+            root, ext = os.path.splitext(dst)
+            dst = f'{root}_{len(moved) + 1}{ext}'
+        shutil.move(src, dst)
+        moved.append(dst)
+
+    note_path = os.path.join(reject_dir, 'README.txt')
+    lines = [
+        'Rejected invalid standard KOA spectrum products.',
+        f'reason: {reason or stats.get("reason", "")}',
+        f'csv_reason: {stats.get("reason", "")}',
+        f'n_points: {stats.get("n_points", 0)}',
+        f'wavelength_min_A: {stats.get("wave_min", np.nan)}',
+        f'wavelength_max_A: {stats.get("wave_max", np.nan)}',
+        f'wavelength_span_A: {stats.get("wave_span", np.nan)}',
+        'These files were moved instead of deleted.',
+    ]
+    with open(note_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines))
+        f.write('\n')
+    moved.append(note_path)
+    return {
+        'paths': moved,
+        'reason': stats.get('reason', ''),
+        'n_points': int(stats.get('n_points', 0) or 0),
+        'wave_span': stats.get('wave_span', np.nan),
+    }
+
+
+def _combine_spec2d_fallback_results(results, target=None, ra=None, dec=None,
+                                     resample_step=None,
+                                     scale_to_overlap=False):
+    components = []
+    for result in results:
+        components.extend(result.get('spectra') or [])
+    components = [c for c in components if _usable_spectrum_result(c)]
+    if not components:
+        return None
+
+    combined = koa.combine_spectra(
+        components, resample_step=resample_step,
+        scale_to_overlap=scale_to_overlap)
+    if combined is None:
+        return None
+    wave, flux, error, n_contrib, _ = combined
+    if int(len(wave)) < 50:
+        return None
+
+    mjds = np.array([_safe_float(spec.get('mjd')) for spec in components],
+                    dtype=float)
+    mjds = mjds[np.isfinite(mjds)]
+    arms = sorted({str(spec.get('arm', '')).strip()
+                   for spec in components if str(spec.get('arm', '')).strip()})
+    obs_ids = sorted({str(spec.get('obs_id', '')).strip()
+                      for spec in components if str(spec.get('obs_id', '')).strip()})
+    return {
+        'survey': 'KOA_LRIS',
+        'instrument': 'LRIS',
+        'source': 'spec2d_fallback_1d',
+        'local_root': os.path.dirname(components[0].get('path', '')),
+        'target': target,
+        'ra': float(ra) if ra is not None else np.nan,
+        'dec': float(dec) if dec is not None else np.nan,
+        'wavelength': wave,
+        'flux': flux,
+        'error': error,
+        'n_contributors': n_contrib,
+        'n_files': len(components),
+        'n_matched_files': len(components),
+        'obs_ids': ','.join(obs_ids),
+        'arms': ','.join(arms),
+        'obs_mjd': float(np.nanmedian(mjds)) if len(mjds) else np.nan,
+        'obs_mjd_min': float(np.nanmin(mjds)) if len(mjds) else np.nan,
+        'obs_mjd_max': float(np.nanmax(mjds)) if len(mjds) else np.nan,
+        'spectra': components,
+        'matched_records': [],
+        'scale_to_overlap': bool(scale_to_overlap),
+        'flux_unit': 'counts',
+        'flux_columns': 'spec2d_fallback_sum',
+    }
+
+
 def _extract_1d_from_spec2d(spec2d_path, target=None, ra=None, dec=None,
                             aperture_half_width=2):
     spec2d_path = os.path.abspath(spec2d_path)
@@ -524,6 +703,12 @@ def _extract_1d_from_spec2d(spec2d_path, target=None, ra=None, dec=None,
     if combined is None:
         return None
     wave, flux, error, n_contrib, _ = combined
+    if int(len(wave)) < 50:
+        return None
+    wave_good = np.isfinite(wave) & (wave > 0)
+    if (int(np.count_nonzero(wave_good)) < 50
+            or float(np.nanmax(wave[wave_good]) - np.nanmin(wave[wave_good])) < 50.0):
+        return None
     mjds = np.array([_safe_float(spec.get('mjd')) for spec in components],
                     dtype=float)
     mjds = mjds[np.isfinite(mjds)]
@@ -586,6 +771,8 @@ def _standardize_existing_1d(row, target_dir, radius_arcsec=None,
             result['target'] = target
             result['ra'] = ra
             result['dec'] = dec
+            if not _usable_spectrum_result(result):
+                continue
             utils.ensure_dir(out_dir)
             csv_path = koa.save_csv(result, out_dir)
             exp_path = koa.save_exposure_table(result, out_dir)
@@ -601,12 +788,21 @@ def _standardize_existing_1d(row, target_dir, radius_arcsec=None,
                 'exposure_path': exp_path,
             }
 
+    fallback_results = []
+    fallback_root = ''
     for root in roots:
         for spec2d_path in _spec2d_files(root):
             result = _extract_1d_from_spec2d(
                 spec2d_path, target=target, ra=ra, dec=dec)
             if result is None:
                 continue
+            fallback_results.append(result)
+            fallback_root = fallback_root or root
+    if fallback_results:
+        result = _combine_spec2d_fallback_results(
+            fallback_results, target=target, ra=ra, dec=dec,
+            resample_step=resample_step, scale_to_overlap=False)
+        if result is not None:
             utils.ensure_dir(out_dir)
             csv_path = koa.save_csv(result, out_dir)
             exp_path = koa.save_exposure_table(result, out_dir)
@@ -615,7 +811,7 @@ def _standardize_existing_1d(row, target_dir, radius_arcsec=None,
             koa.plot_spectrum(result, save_path=png_path)
             return {
                 'result': result,
-                'root': root,
+                'root': fallback_root,
                 'csv_path': csv_path,
                 'png_path': png_path,
                 'report_path': report_path,
@@ -899,8 +1095,40 @@ def _copy_fast_products(redux_root, target_dir):
     return copied
 
 
+def _write_fast_run_log(target_dir, run_info):
+    log_dir = os.path.join(target_dir, 'pypeit_setup', 'fast_logs')
+    utils.ensure_dir(log_dir)
+    tag = _safe_name(
+        os.path.splitext(os.path.basename(run_info.get('fast_pypeit', 'run')))[0],
+        'fast_run')
+    path = os.path.join(log_dir, f'{tag}.log')
+    lines = [
+        f"arm: {run_info.get('arm', '')}",
+        f"source_pypeit: {run_info.get('source_pypeit', '')}",
+        f"fast_pypeit: {run_info.get('fast_pypeit', '')}",
+        f"redux_root: {run_info.get('redux_root', '')}",
+        f"selected_science: {run_info.get('selected_science', '')}",
+        f"n_calib: {run_info.get('n_calib', '')}",
+        f"has_spec1d: {run_info.get('has_spec1d', False)}",
+        f"copied_files: {';'.join(run_info.get('copied_files') or [])}",
+        f"error: {run_info.get('error', '')}",
+        '',
+        '--- stdout ---',
+        run_info.get('stdout', '') or '',
+        '',
+        '--- stderr ---',
+        run_info.get('stderr', '') or '',
+    ]
+    with open(path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines))
+        f.write('\n')
+    run_info['log_path'] = path
+    return path
+
+
 def _run_fast_lris_1d(target_dir, pypeit_files, target=None, prefer_arm='red',
-                      max_science_frames=1, snr_thresh=20.0):
+                      max_science_frames=1, snr_thresh=20.0,
+                      timeout_sec=None):
     safe_target = _safe_name(target, 'target')
     runs = []
     for idx, info in enumerate(_science_pypeit_files(
@@ -931,7 +1159,8 @@ def _run_fast_lris_1d(target_dir, pypeit_files, target=None, prefer_arm='red',
         }
         try:
             proc = koa.run_pypeit_reduction(
-                staged['pypeit_file'], redux_path=redux_root, extra_args=['-o'])
+                staged['pypeit_file'], redux_path=redux_root, extra_args=['-o'],
+                timeout=timeout_sec)
             run_info['stdout'] = proc.stdout
             run_info['stderr'] = proc.stderr
             run_info['copied_files'] = _copy_fast_products(redux_root, target_dir)
@@ -941,7 +1170,10 @@ def _run_fast_lris_1d(target_dir, pypeit_files, target=None, prefer_arm='red',
             )
         except Exception as exc:
             run_info['error'] = f'{type(exc).__name__}: {exc}'
+            run_info['stdout'] = getattr(exc, 'stdout', '') or run_info['stdout']
+            run_info['stderr'] = getattr(exc, 'stderr', '') or run_info['stderr']
             run_info['has_spec1d'] = False
+        _write_fast_run_log(target_dir, run_info)
         runs.append(run_info)
         if run_info['has_spec1d']:
             break
@@ -959,7 +1191,8 @@ def reduce_existing_metadata(output_root, instruments=DEFAULT_INSTRUMENTS,
                              science_min_exptime=30.0,
                              fast_pypeit=False, fast_prefer_arm='red',
                              fast_max_science_frames=1,
-                             fast_snr_thresh=20.0):
+                             fast_snr_thresh=20.0,
+                             fast_timeout_sec=1800):
     """
     Reduce/standardize already downloaded KOA target directories.
 
@@ -1016,6 +1249,7 @@ def reduce_existing_metadata(output_root, instruments=DEFAULT_INSTRUMENTS,
         spectrum_info = None
         fast_runs = []
         fast_calib_selection = []
+        rejected_standard = {}
 
         try:
             raw_roots = []
@@ -1091,6 +1325,7 @@ def reduce_existing_metadata(output_root, instruments=DEFAULT_INSTRUMENTS,
                         prefer_arm=fast_prefer_arm,
                         max_science_frames=fast_max_science_frames,
                         snr_thresh=fast_snr_thresh,
+                        timeout_sec=fast_timeout_sec,
                     )
                     if fast_runs:
                         setup_status = 'fast_run_ok'
@@ -1108,6 +1343,7 @@ def reduce_existing_metadata(output_root, instruments=DEFAULT_INSTRUMENTS,
                         prefer_arm=fast_prefer_arm,
                         max_science_frames=fast_max_science_frames,
                         snr_thresh=fast_snr_thresh,
+                        timeout_sec=fast_timeout_sec,
                     )
                     if fast_runs:
                         setup_status = 'fast_run_ok'
@@ -1125,6 +1361,13 @@ def reduce_existing_metadata(output_root, instruments=DEFAULT_INSTRUMENTS,
                     message = ('No readable extracted 1D spectrum found yet. '
                                'For LRIS, run PypeIt with calibration frames '
                                'or put spec1d/coadd1d FITS under this target.')
+                if spectrum_info is None:
+                    rejected_standard = _archive_invalid_standard_spectrum(
+                        target_dir, reason=message)
+                    if rejected_standard.get('paths'):
+                        suffix = (' Invalid stale koa_spectrum products were '
+                                  'moved to spectrum/rejected/.')
+                        message = (message + suffix) if message else suffix.strip()
             n_fits_after = sum(len(_list_fits(root)) for root in raw_roots)
         except Exception as exc:
             status = 'error'
@@ -1133,6 +1376,62 @@ def reduce_existing_metadata(output_root, instruments=DEFAULT_INSTRUMENTS,
             traceback.print_exc()
 
         result = spectrum_info.get('result') if spectrum_info else {}
+        setup_status_value = setup_status
+        if setup_status == 'skipped' and not pypeit_setup and _old_text(old, 'setup_status'):
+            setup_status_value = _old_text(old, 'setup_status')
+        pypeit_files_value = ';'.join(pypeit_files)
+        normalized_roots_value = ';'.join(sorted(set(normalized_roots)))
+        if not pypeit_setup:
+            pypeit_files_value = pypeit_files_value or _old_text(old, 'pypeit_files')
+            normalized_roots_value = (
+                normalized_roots_value or _old_text(old, 'normalized_raw_roots'))
+            n_setup_files = n_setup_files or _safe_int(old.get('n_pypeit_files', 0))
+            n_header_normalized = (
+                n_header_normalized
+                or _safe_int(old.get('n_header_normalized', 0)))
+            n_bad_fits_skipped = (
+                n_bad_fits_skipped
+                or _safe_int(old.get('n_bad_fits_skipped', 0)))
+        if not download_calib:
+            n_calib_downloaded = (
+                n_calib_downloaded
+                or _safe_int(old.get('n_calib_downloaded', 0)))
+        fast_pypeit_files_value = ';'.join(
+            run.get('fast_pypeit', '') for run in fast_runs)
+        fast_log_files_value = ';'.join(
+            run.get('log_path', '') for run in fast_runs)
+        fast_errors_value = '|'.join(
+            run.get('error', '') for run in fast_runs if run.get('error'))
+        fast_calib_selection_value = '|'.join(fast_calib_selection)
+        n_fast_runs_value = len(fast_runs)
+        if not fast_pypeit:
+            n_fast_runs_value = n_fast_runs_value or _safe_int(
+                old.get('n_fast_runs', 0))
+            fast_pypeit_files_value = (
+                fast_pypeit_files_value or _old_text(old, 'fast_pypeit_files'))
+            fast_log_files_value = (
+                fast_log_files_value or _old_text(old, 'fast_log_files'))
+            fast_errors_value = fast_errors_value or _old_text(old, 'fast_errors')
+            fast_calib_selection_value = (
+                fast_calib_selection_value
+                or _old_text(old, 'fast_calib_selection'))
+        rejected_spectrum_files_value = ';'.join(
+            rejected_standard.get('paths', []))
+        rejected_spectrum_reason_value = rejected_standard.get('reason', '')
+        rejected_spectrum_points_value = rejected_standard.get('n_points', 0)
+        rejected_spectrum_wave_span_value = rejected_standard.get('wave_span', '')
+        if not rejected_spectrum_files_value:
+            rejected_spectrum_files_value = _old_text(
+                old, 'rejected_spectrum_files')
+            rejected_spectrum_reason_value = (
+                rejected_spectrum_reason_value
+                or _old_text(old, 'rejected_spectrum_reason'))
+            rejected_spectrum_points_value = (
+                rejected_spectrum_points_value
+                or _safe_int(old.get('rejected_spectrum_points', 0)))
+            rejected_spectrum_wave_span_value = (
+                rejected_spectrum_wave_span_value
+                or _old_text(old, 'rejected_spectrum_wave_span'))
         progress[key] = {
             'row_index': row_index,
             'target': target,
@@ -1140,7 +1439,7 @@ def reduce_existing_metadata(output_root, instruments=DEFAULT_INSTRUMENTS,
             'dec': row.get('dec'),
             'status': status,
             'error': error,
-            'setup_status': setup_status,
+            'setup_status': setup_status_value,
             'spectrum_status': spectrum_status,
             'message': message,
             'n_selected_rows': _safe_int(row.get('n_selected_rows', 0)),
@@ -1150,8 +1449,8 @@ def reduce_existing_metadata(output_root, instruments=DEFAULT_INSTRUMENTS,
             'n_header_normalized': int(n_header_normalized),
             'n_bad_fits_skipped': int(n_bad_fits_skipped),
             'n_pypeit_files': int(n_setup_files),
-            'pypeit_files': ';'.join(pypeit_files),
-            'normalized_raw_roots': ';'.join(sorted(set(normalized_roots))),
+            'pypeit_files': pypeit_files_value,
+            'normalized_raw_roots': normalized_roots_value,
             'spectrum_root': spectrum_info.get('root') if spectrum_info else '',
             'spectrum_csv': spectrum_info.get('csv_path') if spectrum_info else '',
             'spectrum_png': spectrum_info.get('png_path') if spectrum_info else '',
@@ -1162,14 +1461,19 @@ def reduce_existing_metadata(output_root, instruments=DEFAULT_INSTRUMENTS,
             if result else 0,
             'n_spectrum_points': int(len(result.get('wavelength', [])))
             if result and 'wavelength' in result else 0,
-            'n_fast_runs': len(fast_runs),
-            'fast_pypeit_files': ';'.join(
-                run.get('fast_pypeit', '') for run in fast_runs),
-            'fast_calib_selection': '|'.join(fast_calib_selection),
+            'n_fast_runs': n_fast_runs_value,
+            'fast_pypeit_files': fast_pypeit_files_value,
+            'fast_log_files': fast_log_files_value,
+            'fast_errors': fast_errors_value,
+            'fast_calib_selection': fast_calib_selection_value,
+            'rejected_spectrum_files': rejected_spectrum_files_value,
+            'rejected_spectrum_reason': rejected_spectrum_reason_value,
+            'rejected_spectrum_points': rejected_spectrum_points_value,
+            'rejected_spectrum_wave_span': rejected_spectrum_wave_span_value,
             'target_dir': target_dir,
         }
         _write_reduction_progress(reduction_path, list(progress.values()))
-        print(f'{target}: setup={setup_status}, spectrum={spectrum_status}, '
+        print(f'{target}: setup={setup_status_value}, spectrum={spectrum_status}, '
               f'fits={progress[key]["n_downloaded_fits_after"]}, '
               f'1d_files={progress[key]["n_spectrum_files_used"]}',
               flush=True)
@@ -1417,6 +1721,8 @@ def main(argv=None):
                         help='How many science frames to keep per PypeIt file in --fast-pypeit mode. Default: 1')
     parser.add_argument('--fast-snr-thresh', type=float, default=20.0,
                         help='Object-finding S/N threshold used in --fast-pypeit mode. Default: 20')
+    parser.add_argument('--fast-timeout-sec', type=float, default=1800.0,
+                        help='Timeout for each fast run_pypeit call in seconds. Default: 1800')
     parser.add_argument('--pypeit-setup-only', action='store_true',
                         help='Alias for the default reduction behavior: create setup files but do not run PypeIt.')
     parser.add_argument('--no-pypeit-setup', action='store_true',
@@ -1469,6 +1775,7 @@ def main(argv=None):
             fast_prefer_arm=args.fast_prefer_arm,
             fast_max_science_frames=args.fast_max_science_frames,
             fast_snr_thresh=args.fast_snr_thresh,
+            fast_timeout_sec=args.fast_timeout_sec,
         )
     elif args.download_existing_metadata:
         summary_path, manifest_path = download_existing_metadata(
@@ -1521,6 +1828,7 @@ def main(argv=None):
             fast_prefer_arm=args.fast_prefer_arm,
             fast_max_science_frames=args.fast_max_science_frames,
             fast_snr_thresh=args.fast_snr_thresh,
+            fast_timeout_sec=args.fast_timeout_sec,
         )
     print(f'summary: {summary_path}')
     print(f'manifest: {manifest_path}')

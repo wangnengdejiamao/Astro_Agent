@@ -12,6 +12,8 @@ import sys
 import threading
 import queue
 import subprocess
+import csv
+import time
 
 import matplotlib
 matplotlib.use('TkAgg')
@@ -24,54 +26,76 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import matplotlib.image as mpimg
 
 # 模块列表: (key, category, description)
+# key 与 run_single_target_all_tools.py 生成的 module_status.csv 保持一致。
 MODULE_LIST = [
-    ('SDSS_spectrum',   'Spectra',    'SDSS DR18 optical spectrum'),
-    ('GALAH',           'Spectra',    'GALAH DR4 info'),
-    ('LAMOST',          'Spectra',    'LAMOST DR8 optical spectrum'),
-    ('DESI',            'Spectra',    'DESI DR1 B/R/Z spectrum'),
-    ('KOA_spectrum',    'Spectra',    'KOA/Keck local LRIS spectrum'),
-    ('SPHEREx',         'Spectra',    'SPHEREx low-resolution spectrum'),
-    ('ZTF_lightcurve',  'LightCurve', 'ZTF DR23 g/r/i'),
-    ('WISE_lightcurve', 'LightCurve', 'NEOWISE W1/W2'),
-    ('Gaia_lightcurve', 'LightCurve', 'Gaia DR3 epoch phot'),
-    ('TESS',            'LightCurve', 'TESS SPOC'),
-    ('Kepler/K2',       'LightCurve', 'Kepler or K2'),
-    ('HST_spectrum',    'Spectra',    'HST COS/STIS spectrum'),
-    ('HST_lightcurve',  'LightCurve', 'HST multi-epoch phot'),
-    ('JWST_spectrum',   'Spectra',    'JWST NIRSpec/MIRI spectrum'),
-    ('JWST_lightcurve', 'LightCurve', 'JWST multi-epoch phot'),
-    ('SDSS_photometry', 'Photometry', 'SDSS ugriz'),
-    ('GALEX',           'Photometry', 'GALEX FUV/NUV'),
-    ('2MASS',           'Photometry', '2MASS JHKs'),
-    ('WISE_photometry', 'Photometry', 'AllWISE W1-W4'),
-    ('X-ray',           'X-ray',      'ROSAT/XMM/Chandra/eROSITA'),
-    ('HEASARC_Xray',    'X-ray',      'HEASARC Browse (Swift/NuSTAR/...)'),
-    ('SED',             'Analysis',   'Multi-band SED + BB fit'),
-    ('HR_diagram',      'Analysis',   'Gaia HR diagram + region/age'),
-    ('Binary_SED',      'Analysis',   'WD+M-dwarf binary SED fit'),
-    ('SIMBAD_refs',     'Analysis',   'SIMBAD literature refs'),
+    ('sdss',                 'Spectra',    'SDSS DR18 spectrum + ugriz photometry'),
+    ('desi',                 'Spectra',    'DESI B/R/Z optical spectrum'),
+    ('galah',                'Spectra',    'GALAH DR4 spectrum/info'),
+    ('lamost',               'Spectra',    'LAMOST optical spectrum'),
+    ('hst',                  'Spectra',    'HST spectrum + epoch photometry'),
+    ('jwst',                 'Spectra',    'JWST spectrum + epoch photometry'),
+    ('spherex',              'Spectra',    'SPHEREx spectrum + synthetic photometry'),
+    ('koa',                  'Spectra',    'KOA/Keck LRIS download + extraction setup'),
+    ('ztf',                  'LightCurve', 'ZTF g/r/i light curve'),
+    ('wise',                 'LightCurve', 'AllWISE/NEOWISE photometry + light curve'),
+    ('gaia_lc',              'LightCurve', 'Gaia DR3 epoch photometry'),
+    ('tess',                 'LightCurve', 'TESS SPOC light curve'),
+    ('tess_cache',           'LightCurve', 'Fallback cached TESS products'),
+    ('kepler',               'LightCurve', 'Kepler/K2 light curve'),
+    ('galex',                'Photometry', 'GALEX FUV/NUV'),
+    ('twomass',              'Photometry', '2MASS J/H/Ks'),
+    ('xray',                 'X-ray',      'ROSAT/XMM/Chandra/eROSITA/HEASARC'),
+    ('sed',                  'Analysis',   'Multi-band SED + diagnostics'),
+    ('hr_diagram',           'Analysis',   'Gaia HR diagram + WD region check'),
+    ('diagnostics',          'Analysis',   'Spectral diagnostics and source flags'),
+    ('combined_plots_pre',   'Analysis',   'Combined spectra/photometry overview'),
+    ('period_analysis',      'Analysis',   'Light-curve period search and folds'),
+    ('combined_plots_fold',  'Analysis',   'Folded light-curve overview'),
+    ('wd_fitting',           'Analysis',   'WD model fitting and physical parameters'),
+    ('wd_fitting_selection', 'Analysis',   'Best spectrum selection for WD/RV physics'),
+    ('rv_fitting',           'Analysis',   'RV fitting and DWD velocity evidence'),
+    ('rv_correction',        'Analysis',   'Gravitational-redshift RV correction'),
+    ('rv_wd_variants',       'Analysis',   'RV variants from WD physical solutions'),
+    ('cooling_age',          'Analysis',   'WD cooling age estimate'),
+    ('orbit_traceback',      'Analysis',   'Cluster/orbit traceback candidate search'),
+    ('six_dim',              'Analysis',   '6D cluster/DWD science summary plots'),
+    ('combined_plots_final', 'Analysis',   'Final combined figure refresh'),
+    ('flat_outputs',         'Analysis',   'Flat export of key products'),
+    ('wd_agent',             'Agent',      'Hermes-style WD Agent memory + report'),
 ]
 
-# module key -> plot filename mapping
+# module key -> candidate relative plot names without extension
 PLOT_MAP = {
-    'SDSS_spectrum':   'sdss_spectrum',
-    'LAMOST':          'lamost_spectrum',
-    'DESI':            'desi_spectrum',
-    'KOA_spectrum':    'koa_spectrum',
-    'SPHEREx':         'spherex_spectrum',
-    'ZTF_lightcurve':  'ztf_lightcurve',
-    'WISE_lightcurve': 'wise_lightcurve',
-    'Gaia_lightcurve': 'gaia_lightcurve',
-    'TESS':            'tess_lightcurve',
-    'Kepler/K2':       'kepler_lightcurve',
-    'HST_spectrum':    'hst_spectrum',
-    'HST_lightcurve':  'hst_lightcurve',
-    'JWST_spectrum':   'jwst_spectrum',
-    'JWST_lightcurve': 'jwst_lightcurve',
-    'SED':             'sed',
-    'HR_diagram':      'hr_diagram',
-    'Binary_SED':      'binary_sed',
+    'sdss': ('sdss/sdss_spectrum', 'sdss_spectrum'),
+    'lamost': ('lamost/lamost_spectrum', 'lamost_spectrum'),
+    'desi': ('desi/desi_spectrum', 'desi_spectrum'),
+    'koa': ('koa/koa_spectrum', 'koa_spectrum'),
+    'spherex': ('spherex/spherex_spectrum', 'spherex_spectrum'),
+    'ztf': ('ztf/ztf_lightcurve', 'ztf_lightcurve'),
+    'wise': ('wise/wise_lightcurve', 'wise_lightcurve'),
+    'gaia_lc': ('gaia_lc/gaia_lightcurve', 'gaia_lightcurve'),
+    'tess': ('tess/tess_lightcurve', 'tess_lightcurve'),
+    'tess_cache': ('tess/tess_lightcurve', 'tess_lightcurve'),
+    'kepler': ('kepler/kepler_lightcurve', 'kepler_lightcurve', 'kepler/k2_lightcurve'),
+    'hst': ('hst/hst_spectrum', 'hst/hst_lightcurve', 'hst_spectrum', 'hst_lightcurve'),
+    'jwst': ('jwst/jwst_spectrum', 'jwst/jwst_lightcurve', 'jwst_spectrum', 'jwst_lightcurve'),
+    'sed': ('sed/sed', 'sed'),
+    'hr_diagram': ('hr_diagram/hr_diagram', 'hr_diagram'),
+    'combined_plots_pre': ('combined_plots/combined_spectra',
+                           'combined_plots/spectra_with_photometry'),
+    'period_analysis': ('period_analysis/period_analysis',),
+    'combined_plots_fold': ('combined_plots/combined_fold',),
+    'wd_fitting': ('wd_fitting/wd_fit', 'wd_fitting/wd_spectrum_comparison'),
+    'rv_fitting': ('rv/rv_analysis',),
+    'rv_correction': ('rv_correction/rv_correction',),
+    'cooling_age': ('cooling_age/cooling_age',),
+    'six_dim': ('six_dim/sixdim_5d', 'six_dim/sixdim_ztf',
+                'six_dim/sixdim_sed', 'six_dim/sixdim_rv_info'),
+    'combined_plots_final': ('combined_plots/combined_spectra',
+                             'combined_plots/spectra_with_photometry'),
 }
+
+TERMINAL_STATUSES = {'ok', 'empty', 'error', 'skipped'}
 
 
 class AstroToolboxGUI:
@@ -85,6 +109,7 @@ class AstroToolboxGUI:
         self._plot_names = []
         self._current_plot_idx = -1
         self._completed_count = 0
+        self._finished_modules = set()
         self._output_dir = None
         self._csv_path = None
         self._batch_mode = False
@@ -199,7 +224,7 @@ class AstroToolboxGUI:
 
     def _build_module_selector(self, parent):
         """模块选择区: 复选框网格 + 全选/取消全选"""
-        frame = ttk.LabelFrame(parent, text="Select Modules (勾选要查询的数据)",
+        frame = ttk.LabelFrame(parent, text="Pipeline Progress (真实后端全流程)",
                                padding=5)
         frame.pack(fill=tk.X, pady=(0, 5))
 
@@ -242,10 +267,6 @@ class AstroToolboxGUI:
     def _deselect_all_modules(self):
         for var in self._module_vars.values():
             var.set(False)
-
-    def _get_enabled_modules(self):
-        """返回用户勾选的模块列表"""
-        return [key for key, var in self._module_vars.items() if var.get()]
 
     def _browse_csv(self):
         path = filedialog.askopenfilename(
@@ -331,6 +352,8 @@ class AstroToolboxGUI:
 
         self.tree.tag_configure('ok', foreground='#228B22')
         self.tree.tag_configure('error', foreground='#DC143C')
+        self.tree.tag_configure('empty', foreground='#808080')
+        self.tree.tag_configure('skipped', foreground='#808080')
         self.tree.tag_configure('no_data', foreground='#808080')
         self.tree.tag_configure('querying', foreground='#4169E1')
         self.tree.tag_configure('pending', foreground='#A0A0A0')
@@ -443,11 +466,6 @@ class AstroToolboxGUI:
             self._msg_queue.put(('log', 'Error: RA and DEC must be numbers'))
             return
 
-        enabled = self._get_enabled_modules()
-        if not enabled:
-            self._msg_queue.put(('log', 'Error: 请至少选择一个模块'))
-            return
-
         self._batch_mode = False
         self._set_busy(True)
         self._reset_status_table()
@@ -458,12 +476,12 @@ class AstroToolboxGUI:
         self._completed_count = 0
         self.progress['value'] = 0
 
-        self._log(f"开始查询: RA={ra:.6f}, DEC={dec:.6f}"
-                  f"  ({len(enabled)}/{len(MODULE_LIST)} modules)")
+        self._log(f"开始真实全流程: RA={ra:.6f}, DEC={dec:.6f}")
+        self._log("完成数据层后会自动生成 WD Agent 记忆报告。")
 
         self._cancel_event.clear()
         t = threading.Thread(target=self._query_worker,
-                             args=(ra, dec, enabled), daemon=True)
+                             args=(ra, dec), daemon=True)
         t.start()
 
     def _start_batch_query(self):
@@ -475,11 +493,6 @@ class AstroToolboxGUI:
         dec_col = self.var_dec_col.get().strip()
         if not ra_col or not dec_col:
             self._msg_queue.put(('log', 'Error: 请选择 RA 和 DEC 列'))
-            return
-
-        enabled = self._get_enabled_modules()
-        if not enabled:
-            self._msg_queue.put(('log', 'Error: 请至少选择一个模块'))
             return
 
         self._batch_mode = True
@@ -495,7 +508,7 @@ class AstroToolboxGUI:
 
         self._cancel_event.clear()
         t = threading.Thread(target=self._batch_worker,
-                             args=(self._csv_path, enabled, ra_col, dec_col),
+                             args=(self._csv_path, ra_col, dec_col),
                              daemon=True)
         t.start()
 
@@ -504,54 +517,23 @@ class AstroToolboxGUI:
         self._log("取消请求已发送，等待运行中的查询结束...")
         self.var_progress_text.set("Cancelling...")
 
-    def _query_worker(self, ra, dec, enabled_modules):
-        """后台线程: 运行 AstroQueryAll"""
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        scripts_dir = os.path.join(project_root, 'scripts')
-        if scripts_dir not in sys.path:
-            sys.path.insert(0, scripts_dir)
-        if project_root not in sys.path:
-            sys.path.insert(0, project_root)
-
-        from test_toolbox import AstroQueryAll
-
-        output_dir = os.path.join(project_root, 'output', 'astro_output',
-                                  f'RA{ra:.4f}_DEC{dec:.4f}')
+    def _query_worker(self, ra, dec):
+        """后台线程: 运行真实工具箱后端，然后生成 WD Agent 记忆报告。"""
+        output_base = self._default_output_base()
+        target_label = self._target_label(ra, dec)
+        output_dir = os.path.join(output_base, target_label)
         self._output_dir = output_dir
 
-        querier = AstroQueryAll(ra, dec, output_dir=output_dir,
-                                enabled_modules=enabled_modules)
-        querier.status_callback = self._on_module_callback
+        ok = self._run_target_pipeline(ra, dec, target_label, output_dir)
+        if ok and not self._cancel_event.is_set():
+            self._run_wd_agent_report(ra, dec, target_label, output_dir)
+        self._msg_queue.put(('done', output_dir))
 
-        try:
-            querier.query_all()
-
-            if self._cancel_event.is_set():
-                self._log("已取消，跳过保存")
-                self._msg_queue.put(('done', output_dir))
-                return
-
-            self._log("正在保存数据和生成图表...")
-            querier.save_and_plot_all()
-            self._msg_queue.put(('done', output_dir))
-        except Exception as e:
-            self._log(f"Error: {e}")
-            self._msg_queue.put(('done', output_dir))
-
-    def _batch_worker(self, csv_path, enabled_modules, ra_col, dec_col):
+    def _batch_worker(self, csv_path, ra_col, dec_col):
         """后台线程: CSV 批量查询"""
         import pandas as pd
 
-        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-        scripts_dir = os.path.join(project_root, 'scripts')
-        if scripts_dir not in sys.path:
-            sys.path.insert(0, scripts_dir)
-        if project_root not in sys.path:
-            sys.path.insert(0, project_root)
-
-        from test_toolbox import AstroQueryAll
-
-        output_base = os.path.join(project_root, 'output', 'astro_output')
+        output_base = self._default_output_base()
 
         try:
             df = pd.read_csv(csv_path)
@@ -596,35 +578,193 @@ class AstroToolboxGUI:
             out_dir = os.path.join(output_base, dir_name)
             last_output_dir = out_dir
 
-            source_label = parts[0] if parts else f"({ra:.4f},{dec:.4f})"
+            source_label = dir_name
             self._msg_queue.put(('batch_progress', (i + 1, total, source_label)))
             self._log(f"\n--- [{i+1}/{total}] {source_label} "
                       f"RA={ra:.4f} DEC={dec:.4f} ---")
 
             self._msg_queue.put(('reset_table', None))
 
-            querier = AstroQueryAll(ra, dec, output_dir=out_dir,
-                                    enabled_modules=enabled_modules)
-            querier.status_callback = self._on_module_callback
-            try:
-                querier.query_all()
-                if not self._cancel_event.is_set():
-                    querier.save_and_plot_all()
-            except Exception as e:
-                self._log(f"  源 {source_label} 处理失败: {e}")
+            ok = self._run_target_pipeline(ra, dec, dir_name, out_dir)
+            if ok and not self._cancel_event.is_set():
+                self._run_wd_agent_report(ra, dec, dir_name, out_dir)
 
         self._output_dir = last_output_dir
         self._msg_queue.put(('done', last_output_dir))
 
-    def _on_module_callback(self, name, status, result, elapsed):
-        """从工作线程调用 — 通过消息队列传递到主线程"""
-        self._msg_queue.put(('module_status', (name, status, result, elapsed)))
+    def _project_parent(self):
+        return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+    def _python_executable(self):
+        venv_python = os.path.join(self._project_parent(), '.venv', 'bin', 'python')
+        return venv_python if os.path.exists(venv_python) else (sys.executable or 'python3')
+
+    def _process_env(self):
+        env = os.environ.copy()
+        runtime_dir = os.path.join(self._project_parent(), 'output', 'runtime')
+        pycache_dir = os.path.join(runtime_dir, 'pycache')
+        mpl_dir = os.path.join(runtime_dir, 'matplotlib')
+        os.makedirs(pycache_dir, exist_ok=True)
+        os.makedirs(mpl_dir, exist_ok=True)
+        env.setdefault('PYTHONPYCACHEPREFIX', pycache_dir)
+        env.setdefault('MPLCONFIGDIR', mpl_dir)
+        return env
+
+    def _default_output_base(self):
+        return os.path.join(self._project_parent(), 'output', 'astro_output')
+
+    def _target_label(self, ra, dec):
+        return f'RA{ra:.4f}_DEC{dec:.4f}'.replace('+', '')
+
+    def _run_target_pipeline(self, ra, dec, target_label, output_dir):
+        os.makedirs(output_dir, exist_ok=True)
+        status_cache = {}
+        log_path = os.path.join(output_dir, 'gui_toolbox_run.log')
+        cmd = [
+            self._python_executable(), '-m', 'astro_toolbox.run_single_target_all_tools',
+            '--target', target_label,
+            '--ra', f'{ra:.10f}',
+            '--dec', f'{dec:.10f}',
+            '--output-root', output_dir,
+        ]
+        self._log(f"数据层启动: {target_label}")
+        rc = self._run_logged_process(
+            cmd,
+            cwd=self._project_parent(),
+            log_path=log_path,
+            output_dir=output_dir,
+            status_cache=status_cache,
+            poll_status=True,
+        )
+        self._publish_module_status(output_dir, status_cache, force=True)
+        if rc is None:
+            self._log("数据层已取消")
+            return False
+        if rc != 0:
+            self._log(f"数据层失败，退出码 {rc}; 日志: {log_path}")
+            tail = self._read_text_tail(log_path)
+            if tail:
+                self._log(tail[-1000:])
+            return False
+        self._log(f"数据层完成: {output_dir}")
+        return True
+
+    def _run_wd_agent_report(self, ra, dec, target_label, output_dir):
+        log_path = os.path.join(output_dir, 'gui_wd_agent.log')
+        cmd = [
+            self._python_executable(), '-m', 'astro_toolbox.hermes_wd_agent.run_wd_agent',
+            '--ra', f'{ra:.10f}',
+            '--dec', f'{dec:.10f}',
+            '--target', target_label,
+            '--input-output-root', output_dir,
+            '--output-root', output_dir,
+            '--no-hermes',
+        ]
+        self._msg_queue.put(
+            ('module_status',
+             ('wd_agent', 'querying', 'building memory/report', 0.0))
+        )
+        self._log("WD Agent 启动: 读取工具箱产物并写入 Hermes-style 记忆")
+        rc = self._run_logged_process(
+            cmd,
+            cwd=self._project_parent(),
+            log_path=log_path,
+            output_dir=None,
+            status_cache=None,
+            poll_status=False,
+        )
+        if rc is None:
+            self._msg_queue.put(
+                ('module_status', ('wd_agent', 'skipped', 'cancelled', 0.0))
+            )
+            return False
+        if rc != 0:
+            tail = self._read_text_tail(log_path)
+            self._msg_queue.put(
+                ('module_status', ('wd_agent', 'error', tail[-300:] or log_path, 0.0))
+            )
+            self._log(f"WD Agent 失败，日志: {log_path}")
+            return False
+        detail = 'wd_agent_report.md; source_memory.md; wd_agent_summary.json'
+        self._msg_queue.put(('module_status', ('wd_agent', 'ok', detail, 0.0)))
+        self._log("WD Agent 完成: 已生成报告、source_memory 和 L1/L2 记忆记录")
+        return True
+
+    def _run_logged_process(self, cmd, cwd, log_path, output_dir=None,
+                            status_cache=None, poll_status=False):
+        os.makedirs(os.path.dirname(log_path), exist_ok=True)
+        with open(log_path, 'w', encoding='utf-8') as log:
+            log.write('$ ' + ' '.join(cmd) + '\n\n')
+            log.flush()
+            try:
+                proc = subprocess.Popen(
+                    cmd,
+                    cwd=cwd,
+                    stdout=log,
+                    stderr=subprocess.STDOUT,
+                    text=True,
+                    env=self._process_env(),
+                )
+            except Exception as exc:
+                log.write(f'{type(exc).__name__}: {exc}\n')
+                return 1
+
+            while True:
+                if poll_status and output_dir and status_cache is not None:
+                    self._publish_module_status(output_dir, status_cache)
+                rc = proc.poll()
+                if rc is not None:
+                    return rc
+                if self._cancel_event.is_set():
+                    self._terminate_process(proc)
+                    return None
+                time.sleep(1.0)
+
+    def _terminate_process(self, proc):
+        try:
+            proc.terminate()
+            proc.wait(timeout=10)
+        except subprocess.TimeoutExpired:
+            proc.kill()
+        except Exception:
+            pass
+
+    def _publish_module_status(self, output_dir, status_cache, force=False):
+        status_path = os.path.join(output_dir, 'module_status.csv')
+        if not os.path.exists(status_path):
+            return
+        try:
+            with open(status_path, 'r', encoding='utf-8', newline='') as fh:
+                rows = list(csv.DictReader(fh))
+        except Exception:
+            return
+        for row in rows:
+            name = str(row.get('module', '')).strip()
+            if name not in self._tree_iids:
+                continue
+            status = str(row.get('status', '') or 'empty').strip()
+            detail = row.get('note') or row.get('files') or row.get('output_dir') or ''
+            signature = (status, detail)
+            if force or status_cache.get(name) != signature:
+                status_cache[name] = signature
+                self._msg_queue.put(('module_status', (name, status, detail, 0.0)))
+
+    def _read_text_tail(self, path, max_bytes=4000):
+        try:
+            with open(path, 'rb') as fh:
+                fh.seek(0, os.SEEK_END)
+                size = fh.tell()
+                fh.seek(max(0, size - max_bytes))
+                return fh.read().decode('utf-8', errors='replace')
+        except Exception:
+            return ''
 
     # ================================================================
     #  状态表更新
     # ================================================================
 
     def _reset_status_table(self):
+        self._finished_modules.clear()
         for name, category, desc in MODULE_LIST:
             iid = self._tree_iids.get(name)
             if iid:
@@ -640,7 +780,9 @@ class AstroToolboxGUI:
         status_map = {
             'querying': '...',
             'ok': 'OK',
+            'empty': 'No Data',
             'no_data': 'No Data',
+            'skipped': 'Skipped',
             'error': 'ERROR',
         }
         status_str = status_map.get(status, status)
@@ -653,10 +795,10 @@ class AstroToolboxGUI:
                                status_str, time_str, info_str),
                        tags=(status,))
 
-        if status in ('ok', 'no_data', 'error'):
+        if status in TERMINAL_STATUSES and name not in self._finished_modules:
+            self._finished_modules.add(name)
             self._completed_count += 1
-            enabled = self._get_enabled_modules()
-            total = len(enabled) if enabled else len(MODULE_LIST)
+            total = len(MODULE_LIST)
             self.progress['value'] = self._completed_count / total * 100
             if not self._batch_mode:
                 self.var_progress_text.set(
@@ -666,6 +808,8 @@ class AstroToolboxGUI:
         """提取简短信息"""
         if status == 'querying':
             return 'querying...'
+        if isinstance(result, str):
+            return result[:120]
         if status != 'ok' or result is None:
             if status == 'error' and isinstance(result, str):
                 return result[:50]
@@ -792,11 +936,15 @@ class AstroToolboxGUI:
     def _scan_plots(self, output_dir):
         self._plot_paths = {}
         self._plot_names = []
-        for f in sorted(os.listdir(output_dir)):
-            if f.endswith('.png'):
-                name = f[:-4]
-                self._plot_paths[name] = os.path.join(output_dir, f)
-                self._plot_names.append(name)
+        for root, _, files in os.walk(output_dir):
+            for f in sorted(files):
+                if f.lower().endswith(('.png', '.jpg', '.jpeg')):
+                    path = os.path.join(root, f)
+                    rel = os.path.relpath(path, output_dir)
+                    name = os.path.splitext(rel)[0]
+                    self._plot_paths[name] = path
+                    self._plot_names.append(name)
+        self._plot_names.sort()
 
     def _show_plot_at_index(self, idx):
         if not self._plot_names:
@@ -831,10 +979,18 @@ class AstroToolboxGUI:
             return
         iid = selection[0]
         name = self.tree.item(iid, 'text')
-        plot_name = PLOT_MAP.get(name)
-        if plot_name and plot_name in self._plot_names:
-            idx = self._plot_names.index(plot_name)
-            self._show_plot_at_index(idx)
+        targets = PLOT_MAP.get(name, ())
+        if isinstance(targets, str):
+            targets = (targets,)
+        for target in targets:
+            for idx, plot_name in enumerate(self._plot_names):
+                if plot_name == target or plot_name.endswith('/' + target):
+                    self._show_plot_at_index(idx)
+                    return
+        for idx, plot_name in enumerate(self._plot_names):
+            if plot_name.startswith(name + '/'):
+                self._show_plot_at_index(idx)
+                return
 
     def _open_current_plot(self):
         if 0 <= self._current_plot_idx < len(self._plot_names):

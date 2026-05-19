@@ -292,7 +292,7 @@ class SEDFitter:
 
     def collect_photometry(self, include_galex=True, include_sdss=True,
                            include_gaia=True, include_2mass=True,
-                           include_wise=True, include_spherex=True):
+                           include_wise=True, include_spherex=False):
         """从各巡天收集测光数据 (并行查询加速)。如果已有数据则跳过。"""
         from concurrent.futures import ThreadPoolExecutor, as_completed
 
@@ -316,7 +316,7 @@ class SEDFitter:
         if include_wise and not has_wise:
             tasks['WISE'] = lambda: __import__('astro_toolbox.wise', fromlist=['wise']).get_photometry(self.ra, self.dec)
         if include_spherex and not has_spherex:
-            tasks['SPHEREx'] = lambda: __import__('astro_toolbox.spherex', fromlist=['spherex']).get_photometry(self.ra, self.dec)
+            print("  SED: SPHEREx 不再合成为伪宽带测光点；请作为谱光度叠加诊断使用")
 
         if not tasks:
             print(f"  SED: 已有 {len(self.photometry)} 个波段, 无需查询")

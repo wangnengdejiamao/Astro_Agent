@@ -9,4 +9,14 @@ astro_toolbox - 多波段天文光谱/光变曲线/SED/HR图 工具箱
     lc   = ztf.query_lightcurve(190.3, 2.6)
 """
 
-from . import config, utils, six_dim, diagnostics, koa, koa_batch
+from . import (
+    config,
+    utils,
+    six_dim,
+    diagnostics,
+    koa,
+    koa_batch,
+    magnetic_field,
+    sdssv,
+    wd_age_methods,
+)

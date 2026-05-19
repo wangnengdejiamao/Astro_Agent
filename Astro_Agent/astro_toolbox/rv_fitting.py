@@ -24,6 +24,45 @@ from . import config, utils
 C_KMS = 2.99792458e5
 
 
+def _optical_ccf_coverage(wave, require_balmer=False):
+    """Return whether a spectrum is appropriate for optical WD-template CCF."""
+    try:
+        wave = np.asarray(wave, dtype=float)
+    except Exception:
+        return {'usable': False, 'reason': 'invalid wavelength array'}
+    wave = wave[np.isfinite(wave)]
+    if wave.size < 50:
+        return {'usable': False, 'reason': 'too few finite wavelength pixels'}
+    wmin = float(np.nanmin(wave))
+    wmax = float(np.nanmax(wave))
+    optical_overlap = (wmax >= 3700.0 and wmin <= 9200.0)
+    balmer = [6562.8, 4861.3, 4340.5, 4101.7]
+    n_balmer = int(sum(wmin <= line <= wmax for line in balmer))
+    if not optical_overlap:
+        return {
+            'usable': False,
+            'reason': f'outside optical WD-template range ({wmin:.1f}-{wmax:.1f} A)',
+            'wavelength_min_A': wmin,
+            'wavelength_max_A': wmax,
+            'n_balmer_lines_covered': n_balmer,
+        }
+    if require_balmer and n_balmer < 2:
+        return {
+            'usable': False,
+            'reason': f'insufficient Balmer coverage for optical RV ({n_balmer} lines)',
+            'wavelength_min_A': wmin,
+            'wavelength_max_A': wmax,
+            'n_balmer_lines_covered': n_balmer,
+        }
+    return {
+        'usable': True,
+        'reason': '',
+        'wavelength_min_A': wmin,
+        'wavelength_max_A': wmax,
+        'n_balmer_lines_covered': n_balmer,
+    }
+
+
 # ================================================================
 #  核心 CCF 函数
 # ================================================================
@@ -566,6 +605,7 @@ def run_rv_analysis(results, output_dir=None, ra=None, dec=None):
     rv_report = {
         'pipeline_rvs': [],
         'ccf_results': {},
+        'skipped_spectra': [],
         'best_rv': None,
         'best_rv_err': None,
         'best_rv_source': None,
@@ -621,8 +661,18 @@ def run_rv_analysis(results, output_dir=None, ra=None, dec=None):
     # HST
     hst = results.get('HST_spectrum')
     if hst and isinstance(hst, dict) and 'wavelength' in hst:
-        spectra_to_fit.append(('HST', hst['wavelength'],
-                               hst['flux'], hst.get('error')))
+        coverage = _optical_ccf_coverage(hst['wavelength'], require_balmer=True)
+        if coverage['usable'] and hst.get('usable_for_optical_rv', True):
+            spectra_to_fit.append(('HST', hst['wavelength'],
+                                   hst['flux'], hst.get('error')))
+        else:
+            reason = coverage['reason']
+            if not reason and not hst.get('usable_for_optical_rv', True):
+                reason = 'HST spectrum diagnostics marked not usable for optical RV'
+            skip = {'survey': 'HST', 'reason': reason}
+            skip.update({k: v for k, v in coverage.items() if k != 'usable'})
+            rv_report['skipped_spectra'].append(skip)
+            print(f"  跳过 HST CCF: {reason}")
 
     if not spectra_to_fit:
         print("  无可用光谱做 CCF RV 拟合")
@@ -648,6 +698,13 @@ def run_rv_analysis(results, output_dir=None, ra=None, dec=None):
     # 对每个光谱做 CCF (单星 + 双星)
     all_ccf = {}
     for survey, wave, flux, err in spectra_to_fit:
+        coverage = _optical_ccf_coverage(wave)
+        if not coverage['usable']:
+            skip = {'survey': survey, 'reason': coverage['reason']}
+            skip.update({k: v for k, v in coverage.items() if k != 'usable'})
+            rv_report['skipped_spectra'].append(skip)
+            print(f"  跳过 {survey} CCF: {coverage['reason']}")
+            continue
         print(f"  CCF RV ({survey})...")
         result = measure_rv_binary(wave, flux, err)
         if result is None:
@@ -827,6 +884,17 @@ def _save_rv_summary(rv_report, output_dir, ra, dec):
         lines.append("  (none)")
     lines.append("")
 
+    # Skipped spectra
+    if rv_report.get('skipped_spectra'):
+        lines.append("## Skipped Spectra")
+        for item in rv_report['skipped_spectra']:
+            wave_range = ''
+            if item.get('wavelength_min_A') is not None:
+                wave_range = (f" [{item.get('wavelength_min_A'):.1f}-"
+                              f"{item.get('wavelength_max_A'):.1f} A]")
+            lines.append(f"  {item.get('survey')}: {item.get('reason', '')}{wave_range}")
+        lines.append("")
+
     # Best
     lines.append("## Best RV")
     if rv_report['best_rv'] is not None:
@@ -879,6 +947,17 @@ def save_csv(rv_report, output_dir):
                 'rv_kms': b.get('rv2'), 'rv_err_kms': b.get('rv2_err'),
                 'method': 'CCF_SB2',
             })
+    for item in rv_report.get('skipped_spectra', []):
+        rows.append({
+            'source': str(item.get('survey', '')) + '_skipped',
+            'rv_kms': np.nan,
+            'rv_err_kms': np.nan,
+            'method': 'skipped',
+            'note': item.get('reason', ''),
+            'wavelength_min_A': item.get('wavelength_min_A'),
+            'wavelength_max_A': item.get('wavelength_max_A'),
+            'n_balmer_lines_covered': item.get('n_balmer_lines_covered'),
+        })
     rows.append({
         'source': rv_report.get('best_rv_source', ''),
         'rv_kms': rv_report.get('best_rv'),

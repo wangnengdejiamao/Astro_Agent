@@ -16,6 +16,16 @@ import matplotlib
 matplotlib.use('Agg')
 import matplotlib.pyplot as plt
 from . import config, utils
+from matplotlib.gridspec import GridSpec
+
+
+MIN_PERIOD_DAY = 5.0 / 1440.0
+MIN_PERIOD_MIN = MIN_PERIOD_DAY * 24.0 * 60.0
+
+
+def fold_phase(time, period):
+    """Return phase folded into [0, 1)."""
+    return np.mod(time, period) / period % 1.0
 
 
 # ================================================================
@@ -49,6 +59,117 @@ def flux_to_relative_mag(flux, flux_err=None):
         mag_err[mask] = (2.5 / np.log(10)) * np.abs(flux_err[mask] / flux[mask])
 
     return mag, mag_err
+
+
+def _clean_space_flux_time(time, flux, flux_err=None, max_gap_days=1.0):
+    """
+    Clean TESS/Kepler-like stitched light curves before period search.
+
+    The archive products are often stitched across sectors/campaigns.  A small
+    number of nonphysical values can dominate LS/MHAOV and create cadence
+    aliases, so each time segment is median-normalized and broad outliers are
+    rejected while keeping real eclipse-scale dips.
+    """
+    time = np.asarray(time, dtype=float)
+    flux = np.asarray(flux, dtype=float)
+    err = None if flux_err is None else np.asarray(flux_err, dtype=float)
+    valid = np.isfinite(time) & np.isfinite(flux) & (flux > 0)
+    raw_n = int(len(time))
+    finite_n = int(np.sum(np.isfinite(time) & np.isfinite(flux)))
+    positive_n = int(np.sum(valid))
+    if positive_n < 10:
+        return time[valid], flux[valid], err[valid] if err is not None else None, {
+            'raw_n': raw_n,
+            'finite_n': finite_n,
+            'positive_n': positive_n,
+            'kept_n': positive_n,
+            'removed_n': raw_n - positive_n,
+            'note': 'too few points for segment normalization',
+        }
+
+    t = time[valid]
+    f = flux[valid]
+    e = err[valid] if err is not None and err.shape == flux.shape else None
+    order = np.argsort(t)
+    t = t[order]
+    f = f[order]
+    if e is not None:
+        e = e[order]
+        e = np.where(np.isfinite(e) & (e >= 0), e, np.nan)
+        if np.sum(np.isfinite(e) & (e > 0)) < 10:
+            e = None
+
+    gaps = np.diff(t)
+    cuts = np.where(gaps > max_gap_days)[0] + 1
+    starts = np.r_[0, cuts]
+    stops = np.r_[cuts, len(t)]
+
+    t_out, f_out, e_out = [], [], []
+    for start, stop in zip(starts, stops):
+        ts = t[start:stop]
+        fs = f[start:stop]
+        es = e[start:stop] if e is not None else None
+        good_seg = np.isfinite(fs) & (fs > 0)
+        if np.sum(good_seg) < 5:
+            continue
+        med = np.nanmedian(fs[good_seg])
+        if not np.isfinite(med) or med <= 0:
+            continue
+        rel = fs / med
+        trend_corr = np.ones_like(rel)
+        dt = np.diff(ts)
+        dt = dt[np.isfinite(dt) & (dt > 0)]
+        if len(dt) > 5:
+            dt_med = np.nanmedian(dt)
+            if np.isfinite(dt_med) and dt_med > 0:
+                from scipy.ndimage import median_filter
+                win = int(np.clip(0.5 / dt_med, 51, 2001))
+                if win % 2 == 0:
+                    win += 1
+                if len(rel) > win:
+                    trend = median_filter(rel, size=win, mode='nearest')
+                    trend = np.where(np.isfinite(trend) & (trend > 0),
+                                     trend, np.nanmedian(rel[good_seg]))
+                    trend_corr = trend
+                    rel = rel / trend
+        rel_err = es / med / trend_corr if es is not None else None
+        rel_med = np.nanmedian(rel[good_seg])
+        mad = np.nanmedian(np.abs(rel[good_seg] - rel_med))
+        sigma = 1.4826 * mad if np.isfinite(mad) and mad > 0 else np.nan
+        keep = good_seg & (rel > 0.2) & (rel < 2.0)
+        if np.isfinite(sigma) and sigma > 0:
+            keep &= np.abs(rel - rel_med) <= max(0.8, 12.0 * sigma)
+        t_out.append(ts[keep])
+        f_out.append(rel[keep])
+        if e is not None:
+            e_out.append(rel_err[keep])
+
+    if not t_out:
+        return np.array([]), np.array([]), None, {
+            'raw_n': raw_n,
+            'finite_n': finite_n,
+            'positive_n': positive_n,
+            'kept_n': 0,
+            'removed_n': raw_n,
+            'note': 'all points rejected by cleaning',
+        }
+
+    t_clean = np.concatenate(t_out)
+    f_clean = np.concatenate(f_out)
+    e_clean = np.concatenate(e_out) if e_out else None
+    if e_clean is not None and np.sum(np.isfinite(e_clean) & (e_clean > 0)) < 10:
+        e_clean = None
+    stats = {
+        'raw_n': raw_n,
+        'finite_n': finite_n,
+        'positive_n': positive_n,
+        'kept_n': int(len(t_clean)),
+        'removed_n': int(raw_n - len(t_clean)),
+        'segment_count': int(len(starts)),
+        'flux_min_kept': float(np.nanmin(f_clean)) if len(f_clean) else np.nan,
+        'flux_max_kept': float(np.nanmax(f_clean)) if len(f_clean) else np.nan,
+    }
+    return t_clean, f_clean, e_clean, stats
 
 
 # ================================================================
@@ -97,10 +218,22 @@ def _frequency_grid_for_curve(time, survey):
     if len(dt) == 0:
         return freq_min, None
     dt_ref = np.nanpercentile(dt, 5)
-    freq_max = min(0.5 / dt_ref, 720.0)
+    # User-requested hard floor: do not search periods shorter than 5 minutes.
+    # Older output files can still contain sub-5-min aliases, so selection code
+    # below also marks any such period as non-physical for the paper products.
+    freq_max = min(0.5 / dt_ref, 1.0 / MIN_PERIOD_DAY)
+    if survey in ('TESS', 'Kepler', 'K2'):
+        # Shorter periods are technically searchable at 2-min cadence, but in
+        # stitched survey products they are frequently cadence/systematic
+        # aliases.  Ultra-short candidates remain visible in the individual
+        # periodogram if users lower this cap.
+        freq_min = max(freq_min, 0.2)
+        freq_max = min(freq_max, 120.0)
     if survey == 'WISE':
         # WISE 的半年采样窗函数很强，避免把极高频随机别名当成参考周期。
         freq_max = min(freq_max, 80.0)
+    if freq_max <= freq_min:
+        return None, None
     return freq_min, freq_max
 
 
@@ -146,6 +279,14 @@ def _select_period_result(label, survey, candidates):
     if other_periods:
         relation = _period_relation(best['best_period'], other_periods[0])
     quality = 'good' if relation in ('same', 'half', 'double') else 'single_method'
+    if survey in ('TESS', 'Kepler', 'K2') and best.get('best_period', np.inf) < 0.01:
+        quality = 'cadence_alias'
+        best['alias_warning'] = 'space-cadence/systematics alias candidate; not used as reference period'
+    if best.get('best_period', np.inf) < MIN_PERIOD_DAY:
+        quality = 'below_min_period'
+        best['alias_warning'] = (
+            f'period shorter than {MIN_PERIOD_MIN:.1f} min; treated as an alias '
+            'and not used as a physical period')
     if survey == 'WISE':
         quality = 'fold_only' if quality == 'single_method' else 'caution_alias'
     best['quality'] = quality
@@ -241,24 +382,32 @@ def _extract_lightcurve_data(results, min_pts_ground=20,
     # --- TESS (BTJD → MJD) ---
     tess = results.get('TESS')
     if tess and tess.get('n_points', 0) >= min_pts_space:
-        mag, magerr = flux_to_relative_mag(tess['flux'], tess.get('flux_err'))
         tsys = tess.get('time_system', 'BTJD')
-        curves.append({
-            'time': _to_mjd(tess['time'], tsys),
-            'mag': mag, 'magerr': magerr,
-            'label': 'TESS', 'survey': 'TESS', 'band': 'T',
-        })
+        t_clean, f_clean, ferr_clean, clean_stats = _clean_space_flux_time(
+            tess['time'], tess['flux'], tess.get('flux_err'))
+        if len(t_clean) >= min_pts_space:
+            mag, magerr = flux_to_relative_mag(f_clean, ferr_clean)
+            curves.append({
+                'time': _to_mjd(t_clean, tsys),
+                'mag': mag, 'magerr': magerr,
+                'label': 'TESS', 'survey': 'TESS', 'band': 'T',
+                'cleaning': clean_stats,
+            })
 
     # --- Kepler/K2 (BKJD/BTJD → MJD) ---
     kep = results.get('Kepler/K2')
     if kep and kep.get('n_points', 0) >= min_pts_space:
-        mag, magerr = flux_to_relative_mag(kep['flux'], kep.get('flux_err'))
         tsys = kep.get('time_system', 'BKJD')
-        curves.append({
-            'time': _to_mjd(kep['time'], tsys),
-            'mag': mag, 'magerr': magerr,
-            'label': kep.get('survey', 'Kepler'), 'survey': 'Kepler', 'band': 'Kp',
-        })
+        t_clean, f_clean, ferr_clean, clean_stats = _clean_space_flux_time(
+            kep['time'], kep['flux'], kep.get('flux_err'))
+        if len(t_clean) >= min_pts_space:
+            mag, magerr = flux_to_relative_mag(f_clean, ferr_clean)
+            curves.append({
+                'time': _to_mjd(t_clean, tsys),
+                'mag': mag, 'magerr': magerr,
+                'label': kep.get('survey', 'Kepler'), 'survey': 'Kepler', 'band': 'Kp',
+                'cleaning': clean_stats,
+            })
 
     # --- Gaia (Gaia_BJD → MJD) ---
     gaia = results.get('Gaia_lightcurve')
@@ -430,6 +579,113 @@ def _safe_std(values):
     return float(np.nanstd(values)) if len(values) else np.nan
 
 
+def _fit_harmonic_phase_curve(phase, mag, magerr=None, n_harmonics=4):
+    """
+    Fit a compact multi-harmonic sinusoid to a folded light curve.
+
+    Model:
+        m(phi) = c0 + sum_k [a_k sin(2*pi*k*phi) + b_k cos(2*pi*k*phi)]
+
+    This gives a clean scientific guide curve without drawing many connected
+    median-bin segments across noisy folded photometry.
+    """
+    phase = np.asarray(phase, dtype=float)
+    mag = np.asarray(mag, dtype=float)
+    valid = np.isfinite(phase) & np.isfinite(mag)
+    if magerr is not None:
+        err = np.asarray(magerr, dtype=float)
+        if err.shape == mag.shape:
+            valid &= np.isfinite(err) & (err > 0)
+        else:
+            err = None
+    else:
+        err = None
+
+    ph = phase[valid] % 1.0
+    y = mag[valid]
+    if err is not None:
+        e = err[valid]
+    else:
+        e = None
+
+    if len(y) < max(10, 2 * n_harmonics + 3):
+        return None
+
+    n_h = int(max(1, min(n_harmonics, (len(y) - 3) // 2, 6)))
+    cols = [np.ones_like(ph)]
+    for k in range(1, n_h + 1):
+        ang = 2.0 * np.pi * k * ph
+        cols.append(np.sin(ang))
+        cols.append(np.cos(ang))
+    X = np.column_stack(cols)
+
+    if e is not None and len(e) == len(y):
+        floor = np.nanmedian(e[np.isfinite(e) & (e > 0)])
+        if not np.isfinite(floor) or floor <= 0:
+            floor = np.nanstd(y) if np.nanstd(y) > 0 else 1.0
+        sigma = np.clip(e, floor * 0.5, floor * 20.0)
+        w = 1.0 / sigma
+    else:
+        w = np.ones_like(y)
+
+    keep = np.ones_like(y, dtype=bool)
+    coeff = None
+    for _ in range(2):
+        Xw = X[keep] * w[keep, None]
+        yw = y[keep] * w[keep]
+        try:
+            coeff = np.linalg.lstsq(Xw, yw, rcond=None)[0]
+        except np.linalg.LinAlgError:
+            return None
+        resid = y - X @ coeff
+        mad = np.nanmedian(np.abs(resid[keep] - np.nanmedian(resid[keep])))
+        sigma_r = 1.4826 * mad if np.isfinite(mad) and mad > 0 else np.nanstd(resid[keep])
+        if not np.isfinite(sigma_r) or sigma_r <= 0:
+            break
+        new_keep = np.abs(resid) < 5.0 * sigma_r
+        if new_keep.sum() < max(10, 2 * n_h + 3) or np.all(new_keep == keep):
+            break
+        keep = new_keep
+
+    if coeff is None:
+        return None
+    resid = y[keep] - X[keep] @ coeff
+    rms = float(np.sqrt(np.nanmean(resid**2))) if len(resid) else np.nan
+    return {
+        'coeff': coeff,
+        'n_harmonics': n_h,
+        'n_fit': int(np.sum(keep)),
+        'rms_mag': rms,
+    }
+
+
+def _evaluate_harmonic_phase_curve(fit, phase_grid):
+    """Evaluate a harmonic fit returned by _fit_harmonic_phase_curve."""
+    if not fit:
+        return None
+    phase_grid = np.asarray(phase_grid, dtype=float)
+    coeff = np.asarray(fit.get('coeff'), dtype=float)
+    if coeff.size < 3:
+        return None
+    y = np.full_like(phase_grid, coeff[0], dtype=float)
+    idx = 1
+    for k in range(1, int(fit.get('n_harmonics', 1)) + 1):
+        ang = 2.0 * np.pi * k * phase_grid
+        y += coeff[idx] * np.sin(ang) + coeff[idx + 1] * np.cos(ang)
+        idx += 2
+        if idx + 1 >= coeff.size:
+            break
+    return y
+
+
+def _harmonic_count_for_curve(n_points):
+    if n_points < 30:
+        return 1
+    if n_points < 80:
+        return 2
+    return 4
+
+
 def plot_combined_fold(curves, period, period_source, output_dir,
                        ra=None, dec=None, title_prefix='', t0=None):
     """
@@ -483,30 +739,53 @@ def plot_combined_fold(curves, period, period_source, output_dir,
         color = SURVEY_COLORS.get(curve['label'], 'black')
         morph = analyze_folded_morphology(curve, period, t0=t0)
 
-        if me is not None and len(me) > 0:
-            ax.errorbar(phase, m, yerr=me, fmt='.', color=color,
-                       ms=3, elinewidth=0.35, alpha=0.45)
-            ax.errorbar(phase + 1, m, yerr=me, fmt='.', color=color,
-                       ms=3, elinewidth=0.35, alpha=0.18)
+        has_errors = (me is not None and len(me) > 0)
+        if has_errors:
+            if len(m) > 6000:
+                ax.scatter(phase, m, s=5.0, c=color, alpha=0.055,
+                           edgecolors='none')
+                ax.scatter(phase + 1, m, s=5.0, c=color, alpha=0.028,
+                           edgecolors='none')
+                rng = np.random.default_rng(12345)
+                idx = np.sort(rng.choice(len(m), 6000, replace=False))
+                ax.errorbar(phase[idx], m[idx], yerr=me[idx], fmt='.',
+                            color=color, ms=3.4, elinewidth=0.25,
+                            alpha=0.18, capsize=0)
+                ax.errorbar(phase[idx] + 1, m[idx], yerr=me[idx], fmt='.',
+                            color=color, ms=3.4, elinewidth=0.25,
+                            alpha=0.09, capsize=0)
+            else:
+                ax.errorbar(phase, m, yerr=me, fmt='.', color=color,
+                           ms=5.0, elinewidth=0.45, alpha=0.55)
+                ax.errorbar(phase + 1, m, yerr=me, fmt='.', color=color,
+                           ms=5.0, elinewidth=0.45, alpha=0.24)
         else:
-            ax.scatter(phase, m, s=8, c=color, alpha=0.45,
+            if len(m) > 5000:
+                size, alpha1, alpha2 = 5.0, 0.055, 0.028
+            elif len(m) > 1000:
+                size, alpha1, alpha2 = 12.0, 0.22, 0.10
+            else:
+                size, alpha1, alpha2 = 18.0, 0.55, 0.24
+            ax.scatter(phase, m, s=size, c=color, alpha=alpha1,
                        edgecolors='none')
-            ax.scatter(phase + 1, m, s=8, c=color, alpha=0.18,
+            ax.scatter(phase + 1, m, s=size, c=color, alpha=alpha2,
                        edgecolors='none')
 
-        bx, by, counts = _phase_bin_median(phase, m, n_bins=70)
+        fit = _fit_harmonic_phase_curve(
+            phase, m, me, n_harmonics=_harmonic_count_for_curve(len(m)))
+        if fit:
+            grid = np.linspace(0.0, 2.0, 800)
+            model = _evaluate_harmonic_phase_curve(fit, grid)
+            if model is not None:
+                ax.plot(grid, model, '-', color='black', lw=1.8, alpha=0.9,
+                        label=f"{fit['n_harmonics']}-harmonic sinusoid")
+
+        bx, by, counts = _phase_bin_median(phase, m, n_bins=55)
         if len(bx) >= 3:
-            ax.plot(bx, by, '-', color='black', lw=1.8, alpha=0.9,
-                    label='binned median')
-            ax.plot(bx + 1, by, '-', color='black', lw=1.8, alpha=0.9)
-            ax.scatter(bx, by, s=np.clip(counts, 8, 45), c='white',
-                       edgecolors='black', linewidths=0.5, zorder=5)
-            ax.scatter(bx + 1, by, s=np.clip(counts, 8, 45), c='white',
-                       edgecolors='black', linewidths=0.5, zorder=5)
-        if morph and np.isfinite(morph.get('primary_dip_phase', np.nan)):
-            ph0 = morph['primary_dip_phase']
-            ax.axvline(ph0, color='crimson', lw=0.8, ls='--', alpha=0.6)
-            ax.axvline(ph0 + 1, color='crimson', lw=0.8, ls='--', alpha=0.6)
+            ax.scatter(bx, by, s=np.clip(counts * 1.5, 18, 72), c='white',
+                       edgecolors='black', linewidths=0.65, zorder=5)
+            ax.scatter(bx + 1, by, s=np.clip(counts * 1.5, 18, 72), c='white',
+                       edgecolors='black', linewidths=0.65, zorder=5)
 
         ax.set_ylabel(curve['label'], fontsize=10)
         ax.invert_yaxis()
@@ -522,6 +801,8 @@ def plot_combined_fold(curves, period, period_source, output_dir,
                      f"A={morph['amplitude_mag']:.3f}  "
                      f"D={morph['dip_duty_cycle']:.2f}  "
                      f"Asym={morph['asymmetry']:.2f}")
+            if fit and np.isfinite(fit.get('rms_mag', np.nan)):
+                label += f"  fit RMS={fit['rms_mag']:.3f}"
         else:
             label = f'N={len(m)}'
         ax.text(0.99, 0.94, label, transform=ax.transAxes,
@@ -531,13 +812,300 @@ def plot_combined_fold(curves, period, period_source, output_dir,
 
     axes[-1].set_xlabel('Phase', fontsize=11)
     coord = f'  RA={ra:.4f} DEC={dec:.4f}' if ra is not None else ''
-    title = f'{title_prefix}Phase-folded at P = {period:.6f} d  (from {period_source}){coord}'
+    period_h = period * 24.0
+    title = (f'{title_prefix}Phase-folded at P = {period_h:.4f} h '
+             f'({period:.6f} d; from {period_source}){coord}')
     fig.suptitle(title, fontsize=12)
     fig.tight_layout()
 
     safe_src = period_source.replace(' ', '_')
-    path = os.path.join(output_dir, f'combined_fold_P{period:.4f}d_{safe_src}.png')
+    path = os.path.join(output_dir, f'combined_fold_P{period_h:.3f}h_{safe_src}.png')
     utils.save_and_close(fig, path)
+    return path
+
+
+def _normalize_for_aov(mag):
+    mag = np.asarray(mag, dtype=float)
+    lo = np.nanmin(mag)
+    hi = np.nanmax(mag)
+    if not np.isfinite(lo + hi) or hi <= lo:
+        return mag - np.nanmedian(mag)
+    return (mag - lo) / (hi - lo)
+
+
+def _aov_periodogram_reference(time, mag, magerr=None,
+                               fmin=1e-3, fmax=145.0,
+                               fresolution=1e-3,
+                               finetune_resolution=1e-4):
+    """
+    Run the user-requested P4J MHAOV periodogram when available.
+
+    P4J is optional because it requires compiled extensions on macOS.  The
+    fallback uses the toolbox MHAOV implementation on the same frequency range
+    and keeps the same output convention, including P_orb = 2 / f_best.
+    """
+    time = np.asarray(time, dtype=float)
+    mag = np.asarray(mag, dtype=float)
+    if magerr is None:
+        magerr = np.full_like(mag, np.nanmedian(np.abs(mag - np.nanmedian(mag))) or 0.01)
+    magerr = np.asarray(magerr, dtype=float)
+    valid = np.isfinite(time) & np.isfinite(mag) & np.isfinite(magerr) & (magerr > 0)
+    time = time[valid]
+    mag = mag[valid]
+    magerr = magerr[valid]
+    if len(time) < 5:
+        return None
+
+    try:
+        import P4J  # type: ignore
+        per = P4J.periodogram('MHAOV')
+        per.set_data(time, mag, magerr)
+        per.frequency_grid_evaluation(
+            fmin=fmin, fmax=fmax, fresolution=fresolution)
+        per.finetune_best_frequencies(
+            fresolution=finetune_resolution, n_local_optima=10)
+        freq, power = per.get_periodogram()
+        fbest, pbest = per.get_best_frequencies()
+        best_freq = float(np.ravel(fbest)[0])
+        best_power = float(np.ravel(pbest)[0]) if np.size(pbest) else np.nan
+        backend = 'P4J_MHAOV'
+    except Exception as exc:
+        n_freq = int(max(1000, min(120000, (fmax - fmin) / fresolution)))
+        pr = utils.mhaov(
+            time, mag, magerr,
+            freq_min=fmin, freq_max=fmax,
+            n_freq=n_freq, n_harmonics=3,
+        )
+        if pr is None:
+            return None
+        freq = np.asarray(pr['freqs'], dtype=float)
+        power = np.asarray(pr['power'], dtype=float)
+        idx = int(np.nanargmax(power))
+        best_freq = float(freq[idx])
+        best_power = float(power[idx])
+        backend = f'toolbox_MHAOV_fallback:{type(exc).__name__}'
+
+    objperiod = 2.0 / best_freq
+    return {
+        'best_period': float(objperiod),
+        'best_freq': best_freq,
+        'freqs': np.asarray(freq, dtype=float),
+        'power': np.asarray(power, dtype=float),
+        'best_power': best_power,
+        'backend': backend,
+        'n_points': int(len(time)),
+        'period_min': float(objperiod * 24.0 * 60.0),
+        'period_hour': float(objperiod * 24.0),
+    }
+
+
+def _ztf_band_dataframe(ztf_result, band):
+    if ztf_result is None or band not in ztf_result:
+        return None
+    df = ztf_result[band].copy()
+    if len(df) == 0:
+        return None
+    time_col = 'hjd' if 'hjd' in df.columns else 'mjd'
+    cols = {time_col: 'time', 'mjd': 'mjd', 'mag': 'mag', 'magerr': 'magerr'}
+    keep = [c for c in cols if c in df.columns]
+    out = df[keep].rename(columns=cols)
+    if 'time' not in out.columns and 'mjd' in out.columns:
+        out['time'] = out['mjd']
+    if 'ra' not in out.columns:
+        out['ra'] = ztf_result.get('ra', np.nan)
+    if 'dec' not in out.columns:
+        out['dec'] = ztf_result.get('dec', np.nan)
+    out = out.dropna(subset=['time', 'mag', 'magerr']).sort_values('time')
+    return out.reset_index(drop=True)
+
+
+def plot_ztf_aov_reference(ztf_result, output_dir, ra=None, dec=None,
+                           target_name='', filename='ztf_aov_reference.png'):
+    """
+    Plot a ZTF AOV period figure in the user-provided layout.
+
+    The plot prefers g/r when both are available, but will fall back to any
+    two usable ZTF bands, or a single available ZTF band, so every ZTF period
+    source can still get a consistent AOV reference image.
+    """
+    if ztf_result is None:
+        return None
+    utils.ensure_dir(output_dir)
+    bands = []
+    for band in ('g', 'r', 'i', 'all'):
+        df = _ztf_band_dataframe(ztf_result, band)
+        if df is not None and len(df) >= 5:
+            bands.append((band, df))
+    if not bands:
+        return None
+
+    if len(bands) >= 2:
+        b1_name, b1 = bands[0]
+        b2_name, b2 = bands[1]
+    else:
+        b1_name, b1 = bands[0]
+        b2_name, b2 = bands[0]
+
+    tref0 = min(float(b1['time'].min()), float(b2['time'].min()))
+    t_1 = np.asarray(b1['time'], dtype=float) - tref0
+    t_2 = np.asarray(b2['time'], dtype=float) - tref0
+    y_1 = _normalize_for_aov(b1['mag'])
+    y_2 = _normalize_for_aov(b2['mag'])
+    dy_1 = np.asarray(b1['magerr'], dtype=float)
+    dy_2 = np.asarray(b2['magerr'], dtype=float)
+    t_a = np.concatenate([t_1, t_2]) if b1_name != b2_name else t_1
+    mag_a = np.concatenate([np.asarray(b1['mag'], dtype=float),
+                            np.asarray(b2['mag'], dtype=float)]) if b1_name != b2_name else np.asarray(b1['mag'], dtype=float)
+    y_a = _normalize_for_aov(mag_a)
+    dy_a = np.concatenate([dy_1, dy_2]) if b1_name != b2_name else dy_1
+
+    entropy_1 = _aov_periodogram_reference(t_1, y_1, dy_1)
+    entropy_2 = _aov_periodogram_reference(t_2, y_2, dy_2)
+    entropy_a = _aov_periodogram_reference(t_a, y_a, dy_a)
+    if entropy_1 is None or entropy_2 is None or entropy_a is None:
+        return None
+
+    period = entropy_2['best_period']
+    phase_1 = fold_phase(t_1, entropy_1['best_period'])
+    phase_2 = fold_phase(t_2, entropy_2['best_period'])
+
+    try:
+        import astropy.coordinates as coord
+        c = coord.SkyCoord(
+            float(b1['ra'].iloc[0]) if np.isfinite(b1['ra'].iloc[0]) else ra,
+            float(b1['dec'].iloc[0]) if np.isfinite(b1['dec'].iloc[0]) else dec,
+            unit='deg',
+            frame='icrs')
+        ztf_name = c.to_string('hmsdms', sep='', precision=2).replace(' ', '')
+    except Exception:
+        ztf_name = target_name or 'unknown'
+
+    with plt.rc_context({'font.size': 13, 'font.family': 'serif'}):
+        fig = plt.figure(figsize=(14, 16))
+        gs = GridSpec(6, 1, height_ratios=[4.0, 1.5, 4.0, 1.0, 2.0, 2.0],
+                      hspace=0)
+        ax0 = fig.add_subplot(gs[0])
+        ax2 = fig.add_subplot(gs[2])
+        ax4 = fig.add_subplot(gs[4])
+        ax5 = fig.add_subplot(gs[5])
+
+        band_colors = {'g': 'g', 'r': 'r', 'i': 'goldenrod', 'all': 'k'}
+        band_markers = {'g': 'x', 'r': 'o', 'i': '^', 'all': '.'}
+        plot_bands = [(b1_name, b1, 0.78), (b2_name, b2, 0.72)]
+        if b1_name == b2_name:
+            plot_bands = [(b1_name, b1, 0.78)]
+
+        for band_name, data, alpha in plot_bands:
+            ax0.errorbar(data['mjd'] if 'mjd' in data else data['time'],
+                         data['mag'], yerr=data['magerr'],
+                         c=band_colors.get(band_name, 'k'),
+                         label=band_name,
+                         marker=band_markers.get(band_name, '.'),
+                         ms=3.0, elinewidth=0.55, alpha=alpha, ls='none')
+        ax0.set_xlabel('MJD', fontsize=16)
+        ax0.set_ylabel('Mag', fontsize=16)
+        ax0.minorticks_on()
+        ax0.tick_params(which='both', axis='both', direction='in',
+                        right=True, top=True, labelsize=13)
+        ax0.legend(fontsize=12, handletextpad=0.5, numpoints=3,
+                   markerscale=0.9)
+        ax0.invert_yaxis()
+        band_count_text = '{} N = {}'.format(b1_name, len(b1))
+        if b2_name != b1_name:
+            band_count_text += ',  {} N = {}'.format(b2_name, len(b2))
+        title_a = 'RA = {:0.6f}  Dec = {:0.6f},  {}'.format(
+            float(ra if ra is not None else b1['ra'].iloc[0]),
+            float(dec if dec is not None else b1['dec'].iloc[0]),
+            band_count_text)
+        ax0.set_title(title_a, fontsize=16, pad=8)
+
+        for i in range(3):
+            ax2.errorbar(phase_1 + float(i), b1['mag'],
+                         yerr=b1['magerr'], c=band_colors.get(b1_name, 'k'),
+                         label=b1_name if i == 0 else None,
+                         marker=band_markers.get(b1_name, '.'),
+                         ms=3.0, elinewidth=0.5,
+                         alpha=0.74, ls='none')
+            if b2_name != b1_name:
+                ax2.errorbar(phase_2 + float(i), b2['mag'],
+                             yerr=b2['magerr'],
+                             c=band_colors.get(b2_name, 'k'),
+                             label=b2_name if i == 0 else None,
+                             marker=band_markers.get(b2_name, '.'),
+                             ms=2.8, elinewidth=0.5,
+                             alpha=0.66, ls='none')
+        ax2.set_xlim(-0.05, 2.05)
+        title = 'ZTF J{} Light Curve Folded on Period (AOV) = {:.6f} d ({:.2f} min)'.format(
+            ztf_name, period, period * 24.0 * 60.0)
+        ax2.set_title(title, fontsize=15, pad=8)
+        ax2.legend(fontsize=12, handletextpad=0.5, numpoints=3,
+                   markerscale=0.9)
+        ax2.set_xlabel('Orbital Phase', fontsize=16)
+        ax2.set_ylabel('Apparent Magnitude', fontsize=16)
+        ax2.minorticks_on()
+        ax2.tick_params(which='both', axis='both', direction='in',
+                        right=True, top=True, labelbottom=True, labelsize=13)
+        ax2.invert_yaxis()
+
+        ax4.plot(1.0 / entropy_1['freqs'], entropy_1['power'], ls='-',
+                 c=band_colors.get(b1_name, 'k'), lw=1.0)
+        ax5.plot(1.0 / entropy_2['freqs'], entropy_2['power'], ls='-',
+                 c=band_colors.get(b2_name, 'k'), lw=1.0)
+        ax4.axvline(entropy_1['best_period'] / 2.0, color='k', ls='--', lw=1.0)
+        ax5.axvline(entropy_2['best_period'] / 2.0, color='k', ls='--', lw=1.0)
+        ax4.set_xlim(0, 20)
+        ax5.set_xlim(0, 20)
+        ax5.set_xlabel('Period [day]', fontsize=16)
+        ax5.set_ylabel('AOV power', fontsize=14)
+        ax4.set_ylabel('AOV power', fontsize=14)
+        ax4.minorticks_on()
+        ax5.minorticks_on()
+        ax4.tick_params(which='both', axis='both', direction='in',
+                        right=True, top=True, labelbottom=False, labelsize=13)
+        ax5.tick_params(which='both', axis='both', direction='in',
+                        right=True, top=True, labelbottom=True, labelsize=13)
+
+        if b2_name != b1_name:
+            backend_text = (
+                f"backend {b1_name}={entropy_1['backend']}; "
+                f"{b2_name}={entropy_2['backend']}; "
+                f"combined P_orb={entropy_a['period_min']:.2f} min."
+            )
+        else:
+            backend_text = (
+                f"backend {b1_name}={entropy_1['backend']}; "
+                f"P_orb={entropy_1['period_min']:.2f} min."
+            )
+        footer = (
+            f"{backend_text} P_orb=2/f_best as in the supplied reference "
+            "script; periodogram x-axis is 1/f_best."
+        )
+        fig.text(0.10, 0.025, footer, fontsize=9.5, color='#333')
+        fig.subplots_adjust(left=0.10, right=0.97, top=0.955,
+                            bottom=0.075, hspace=0.28)
+        path = os.path.join(output_dir, filename)
+        fig.savefig(path, dpi=240, bbox_inches='tight', pad_inches=0.16)
+        plt.close(fig)
+
+    import pandas as pd
+    rows = []
+    entropy_rows = [(b1_name, entropy_1)]
+    if b2_name != b1_name:
+        entropy_rows.append((b2_name, entropy_2))
+        entropy_rows.append(('combined', entropy_a))
+    for band, ent in entropy_rows:
+        rows.append({
+            'band': band,
+            'best_period_day_orbital_2_over_f': ent['best_period'],
+            'best_period_min': ent['period_min'],
+            'best_freq_day': ent['best_freq'],
+            'best_power': ent['best_power'],
+            'n_points': ent['n_points'],
+            'backend': ent['backend'],
+            'target': target_name,
+        })
+    pd.DataFrame(rows).to_csv(
+        os.path.join(output_dir, filename.replace('.png', '.csv')), index=False)
     return path
 
 
@@ -572,12 +1140,49 @@ def run_period_analysis(results, output_dir, ra=None, dec=None,
     for c in curves:
         n_valid = np.sum(np.isfinite(c['mag']))
         print(f"    {c['label']:12s}: {n_valid} 个有效点")
+        if c.get('cleaning'):
+            stats = c['cleaning']
+            print(f"      cleaned {stats.get('raw_n', 0)} -> "
+                  f"{stats.get('kept_n', n_valid)} points "
+                  f"({stats.get('segment_count', 0)} segments)")
+
+    tess_lk_period = None
+    tess_result = results.get('TESS')
+    if isinstance(tess_result, dict):
+        tess_lk_period = tess_result.get('lightkurve_period_analysis')
+        if tess_lk_period is None:
+            try:
+                from . import tess as tess_module
+                tess_lk_period = tess_module.analyze_period_lightkurve(
+                    tess_result, output_dir)
+                if tess_lk_period is not None:
+                    tess_result['lightkurve_period_analysis'] = tess_lk_period
+            except Exception as exc:
+                print(f"    TESS Lightkurve 周期分析跳过: {exc}")
 
     # 对每条曲线运行 MHAOV + Lomb-Scargle，互相检查别名/半周期问题。
     period_results = {}
     all_period_results = {}
     for curve in curves:
         label = curve['label']
+        if curve.get('survey') == 'TESS' and tess_lk_period is not None:
+            pr = {
+                'best_period': float(tess_lk_period['best_period_day']),
+                'fap': 0.0,
+                'method': 'lightkurve_lombscargle',
+                'quality': 'lightkurve_native',
+                'agreement': 'TESS native periodogram',
+                'n_points': int(tess_lk_period.get('n_points', 0)),
+                'power': tess_lk_period.get('power'),
+                'two_period_day': tess_lk_period.get('two_period_day'),
+                'fap_note': 'Lightkurve periodogram used; FAP not calibrated here',
+            }
+            period_results[label] = pr
+            all_period_results[label] = [pr]
+            print(f"    {label}: P={pr['best_period'] * 24.0:.4f} h "
+                  f"({pr['best_period']:.6f} d), Lightkurve; "
+                  f"2P={pr['two_period_day'] * 24.0:.4f} h")
+            continue
         t = curve['time']
         m = curve['mag']
         me = curve['magerr']
@@ -627,14 +1232,17 @@ def run_period_analysis(results, output_dir, ra=None, dec=None,
         period_results[label] = pr
         all_period_results[label] = [p for p in (pr_mhaov, pr_ls) if p is not None]
         if pr is not None:
-            p_min = pr['best_period'] * 24 * 60
-            print(f"    {label}: P={pr['best_period']:.6f} d ({p_min:.2f} min), "
+            p_h = pr['best_period'] * 24.0
+            p_min = p_h * 60.0
+            print(f"    {label}: P={p_h:.4f} h ({p_min:.2f} min; {pr['best_period']:.6f} d), "
                   f"{pr.get('method','?')}, FAP={pr['fap']:.2e}, quality={quality}")
 
     # 识别可靠检测
     detections = {}
     for label, pr in period_results.items():
-        if pr is not None and pr['fap'] < fap_threshold:
+        if (pr is not None and pr['fap'] < fap_threshold
+                and pr.get('quality') != 'below_min_period'
+                and pr.get('best_period', np.inf) >= MIN_PERIOD_DAY):
             detections[label] = pr
 
     # 选定参考周期: 优先 TESS/Kepler，其次 ZTF，再看其它；WISE 只作折叠验证。
@@ -642,11 +1250,32 @@ def run_period_analysis(results, output_dir, ra=None, dec=None,
     reference_source = None
     usable_detections = {
         label: pr for label, pr in detections.items()
-        if pr.get('quality') != 'fold_only'
+        if pr.get('quality') not in ('fold_only', 'cadence_alias', 'below_min_period')
     }
     if usable_detections:
-        best_label = min(usable_detections,
-                         key=lambda k: _reference_priority(k, usable_detections[k]))
+        for label, pr in usable_detections.items():
+            support = 0
+            harmonics = []
+            for other_label, other_pr in usable_detections.items():
+                if other_label == label:
+                    continue
+                rel = _period_relation(pr.get('best_period'),
+                                       other_pr.get('best_period'), tol=0.08)
+                if rel in ('same', 'half', 'double'):
+                    support += 1
+                    harmonics.append(f'{other_label}:{rel}')
+            pr['cross_survey_support'] = support
+            pr['cross_survey_harmonics'] = ';'.join(harmonics)
+        max_support = max(pr.get('cross_survey_support', 0)
+                          for pr in usable_detections.values())
+        if max_support > 0:
+            ref_pool = {
+                label: pr for label, pr in usable_detections.items()
+                if pr.get('cross_survey_support', 0) == max_support
+            }
+        else:
+            ref_pool = usable_detections
+        best_label = min(ref_pool, key=lambda k: _reference_priority(k, ref_pool[k]))
         reference_period = usable_detections[best_label]['best_period']
         reference_source = best_label
 
@@ -680,6 +1309,8 @@ def run_period_analysis(results, output_dir, ra=None, dec=None,
     # 收集不同的周期 (差异 >10% 视为不同)
     distinct_periods = []
     for label, pr in detections.items():
+        if pr.get('quality') in ('fold_only', 'cadence_alias', 'below_min_period'):
+            continue
         p = pr['best_period']
         is_new = all(abs(p - dp) / max(p, dp) > 0.10
                      for dp, _ in distinct_periods)
@@ -708,26 +1339,56 @@ def run_period_analysis(results, output_dir, ra=None, dec=None,
                 figures.append(path)
 
     n_det = len(detections)
+    orbital_period_candidate = None
+    orbital_period_source = None
     if reference_period:
         for curve in curves:
             morphology[f"{curve['label']} @ reference"] = analyze_folded_morphology(
                 curve, reference_period, t0=global_t0)
+        ref_pr = period_results.get(reference_source, {}) if reference_source else {}
+        harmonic_note = str(ref_pr.get('cross_survey_harmonics', ''))
+        if reference_period < 0.1 and harmonic_note:
+            # Compact WD/DWD light curves often return the strongest
+            # photometric harmonic rather than the physical orbital period.
+            # Save the 2x fold so the primary/secondary eclipse ambiguity can
+            # be checked without rerunning the pipeline.
+            orbital_period_candidate = 2.0 * reference_period
+            orbital_period_source = f'{reference_source}_2x_candidate'
+            path = plot_combined_fold(
+                curves, orbital_period_candidate, orbital_period_source,
+                output_dir, ra=ra, dec=dec, title_prefix=title_prefix,
+                t0=global_t0)
+            if path:
+                figures.append(path)
+                print(f"    -> {os.path.basename(path)} (2x 候选轨道周期)")
+            for curve in curves:
+                morphology[f"{curve['label']} @ 2x candidate"] = (
+                    analyze_folded_morphology(
+                        curve, orbital_period_candidate, t0=global_t0))
         print(f"  周期分析完成: {n_det} 个周期检测, "
-              f"参考 P={reference_period:.6f} d ({reference_source})")
+              f"参考 P={reference_period * 24.0:.4f} h "
+              f"({reference_period:.6f} d, {reference_source})")
+        if orbital_period_candidate:
+            print(f"    2x 候选轨道周期: P={orbital_period_candidate * 24.0:.4f} h "
+                  f"({orbital_period_candidate:.6f} d) "
+                  f"({orbital_period_source})")
     else:
         # 未达到 FAP 阈值, 但仍然生成最佳候选周期的联合折叠图供目视检查
         # 选择 FAP 最低的周期结果
         best_candidate = None
         best_fap = 1.0
         for label, pr in period_results.items():
-            if pr is not None and pr['fap'] < best_fap:
+            if (pr is not None and pr['fap'] < best_fap
+                    and pr.get('quality') not in ('cadence_alias', 'below_min_period')
+                    and pr.get('best_period', np.inf) >= MIN_PERIOD_DAY):
                 best_fap = pr['fap']
                 best_candidate = (pr['best_period'], label)
 
         if best_candidate is not None:
             cand_period, cand_label = best_candidate
             print(f"  周期分析完成: 未达到 FAP 阈值 ({fap_threshold}), "
-                  f"最佳候选 P={cand_period:.6f} d ({cand_label}, FAP={best_fap:.2e})")
+                  f"最佳候选 P={cand_period * 24.0:.4f} h "
+                  f"({cand_period:.6f} d, {cand_label}, FAP={best_fap:.2e})")
             reference_period = cand_period
             reference_source = cand_label
             path = plot_combined_fold(
@@ -745,11 +1406,15 @@ def run_period_analysis(results, output_dir, ra=None, dec=None,
 
     return {
         'curves': curves,
+        'cleaning': {c['label']: c.get('cleaning', {}) for c in curves
+                     if c.get('cleaning')},
         'period_results': period_results,
         'all_period_results': all_period_results,
         'detections': detections,
         'reference_period': reference_period,
         'reference_source': reference_source,
+        'orbital_period_candidate': orbital_period_candidate,
+        'orbital_period_source': orbital_period_source,
         'distinct_periods': distinct_periods,
         'figures': figures,
         'morphology': morphology,
@@ -768,13 +1433,27 @@ def save_csv(pa_result, output_dir):
             rows.append({
                 'curve': label,
                 'best_period_day': pr['best_period'],
+                'best_period_hour': pr['best_period'] * 24,
                 'best_period_min': pr['best_period'] * 24 * 60,
                 'fap': pr['fap'],
                 'n_points': pr.get('n_points'),
-                'detected': pr['fap'] < 0.01,
+                'detected': (
+                    pr['fap'] < 0.01
+                    and pr.get('best_period', np.inf) >= MIN_PERIOD_DAY
+                    and pr.get('quality') != 'below_min_period'
+                ),
                 'method': pr.get('method'),
                 'quality': pr.get('quality'),
                 'agreement': pr.get('agreement'),
+                'two_period_day': pr.get('two_period_day'),
+                'two_period_hour': (
+                    pr.get('two_period_day') * 24
+                    if pr.get('two_period_day') is not None else np.nan
+                ),
+                'fap_note': pr.get('fap_note', ''),
+                'alias_warning': pr.get('alias_warning', ''),
+                'cross_survey_support': pr.get('cross_survey_support'),
+                'cross_survey_harmonics': pr.get('cross_survey_harmonics', ''),
                 'candidate_methods': pr.get('candidate_methods'),
             })
     for key, morph in pa_result.get('morphology', {}).items():
@@ -783,6 +1462,10 @@ def save_csv(pa_result, output_dir):
         rows.append({
             'curve': morph.get('curve') or key,
             'best_period_day': morph.get('period_day'),
+            'best_period_hour': (
+                morph.get('period_day') * 24
+                if morph.get('period_day') is not None else np.nan
+            ),
             'best_period_min': morph.get('period_min'),
             'fap': np.nan,
             'n_points': morph.get('n_points'),
@@ -793,6 +1476,25 @@ def save_csv(pa_result, output_dir):
             'dip_duty_cycle': morph.get('dip_duty_cycle'),
             'primary_dip_phase': morph.get('primary_dip_phase'),
             'smoothness': morph.get('smoothness'),
+            })
+    for label, stats in pa_result.get('cleaning', {}).items():
+        row = {'curve': label, 'best_period_day': np.nan,
+               'best_period_hour': np.nan,
+               'best_period_min': np.nan, 'fap': np.nan,
+               'detected': False, 'method': 'cleaning_summary'}
+        row.update(stats)
+        rows.append(row)
+    if pa_result.get('orbital_period_candidate'):
+        p = pa_result.get('orbital_period_candidate')
+        rows.append({
+            'curve': pa_result.get('orbital_period_source', '2x_candidate'),
+            'best_period_day': p,
+            'best_period_hour': p * 24,
+            'best_period_min': p * 24 * 60,
+            'fap': np.nan,
+            'detected': False,
+            'method': '2x_harmonic_candidate',
+            'quality': 'inspect_fold',
         })
     if not rows:
         return None

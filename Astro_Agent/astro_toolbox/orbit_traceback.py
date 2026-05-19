@@ -26,16 +26,10 @@ import matplotlib.pyplot as plt
 from . import config, utils
 
 # Hunt+2023 星团表路径
-# Allow override via env var; otherwise try a list of plausible locations
-# (different machines, different users).
-import os as _os
-_HUNT_CANDIDATES = [
-    _os.environ.get('ASTRO_TOOLBOX_HUNT_DIR') or '',
+_HUNT_DIR = os.environ.get(
+    'ASTRO_TOOLBOX_HUNT2023_DIR',
     '/Users/a1/Desktop/星团/Hunt+2023',
-    '/Users/ljm/Desktop/csst/星团/Hunt+2023',
-    _os.path.expanduser('~/Desktop/星团/Hunt+2023'),
-]
-_HUNT_DIR = next((p for p in _HUNT_CANDIDATES if p and _os.path.isdir(p)), _HUNT_CANDIDATES[1])
+)
 _CLUSTER_CACHE = None
 
 
@@ -306,20 +300,11 @@ def find_closest_approach(wd_orbit, cluster, t_back_myr=500, dt_myr=0.5):
     min_sep = seps[i_min]
     min_time = wd_orbit['ts_myr'][i_min]
 
-    # Two independent physical filters:
-    #   within_tidal: spatial — was the source inside the cluster's tidal radius?
-    #   time_consistent: temporal — was the cluster already gravitationally bound
-    #       at the closest-approach epoch?  Approach time > cluster age means the
-    #       cluster had not yet formed, so escape from it is impossible.
-    within_tidal = bool(min_sep < rtpc)
-    time_consistent = bool(np.isfinite(age_myr) and min_time < age_myr)
     return {
         'cluster_name': cl_name,
-        'min_sep_pc': float(min_sep),
-        'min_sep_time_myr': float(min_time),
-        'within_tidal': within_tidal,
-        'time_consistent': time_consistent,
-        'physically_plausible_host': within_tidal and time_consistent,
+        'min_sep_pc': min_sep,
+        'min_sep_time_myr': min_time,
+        'within_tidal': min_sep < rtpc,
         'rtpc': rtpc,
         'cluster_age_myr': age_myr,
         'cluster_rv': cl_rv,
@@ -446,41 +431,22 @@ def trace_back_to_clusters(ra, dec, rv, rv_err=None,
         if approach and approach['min_sep_pc'] < max_sep_pc:
             approaches.append(approach)
 
-    # Sort by (plausibility desc, min_sep asc): physically plausible hosts
-    # (inside tidal radius AND approach time before cluster age) come first.
-    approaches.sort(key=lambda x: (not x.get('physically_plausible_host', False),
-                                   not x.get('within_tidal', False),
-                                   x['min_sep_pc']))
+    # 按最小间距排序
+    approaches.sort(key=lambda x: x['min_sep_pc'])
     result['candidates'] = approaches
 
-    plausible = [a for a in approaches if a.get('physically_plausible_host')]
-    result['plausible_hosts'] = plausible
-    best = None
-    if plausible:
-        best = plausible[0]
-        result['best_match'] = best
-        result['best_match_basis'] = 'within_tidal_and_time_consistent'
-    elif approaches:
+    if approaches:
         best = approaches[0]
         result['best_match'] = best
-        result['best_match_basis'] = 'closest_only_NOT_time_consistent'
-
-    if best is not None:
-        tidal_flag = " (< 潮汐半径)" if best['within_tidal'] else ""
-        time_flag = " (时间一致)" if best.get('time_consistent') else " (时间不一致!)"
-        basis = result.get('best_match_basis', '?')
+        tidal_flag = " (< 潮汐半径!)" if best['within_tidal'] else ""
         print(f"  最佳匹配: {best['cluster_name']}  "
               f"最小间距={best['min_sep_pc']:.1f} pc (rt={best['rtpc']:.1f} pc) "
-              f"@ {best['min_sep_time_myr']:.1f} Myr ago{tidal_flag}{time_flag} "
-              f"[basis={basis}]")
+              f"@ {best['min_sep_time_myr']:.1f} Myr ago{tidal_flag}")
+
         # 打印前 5
-        print(f"\n  Top-5 候选星团 (S=空间通过 T=时间通过 ***=两者都通过):")
+        print(f"\n  Top-5 候选星团:")
         for i, a in enumerate(approaches[:5]):
-            s = "S" if a['within_tidal'] else "."
-            t = "T" if a.get('time_consistent') else "."
-            flag = f" [{s}{t}]"
-            if a.get('physically_plausible_host'):
-                flag += " ***"
+            flag = " ***" if a['within_tidal'] else ""
             age_str = f"{a['cluster_age_myr']:.0f}" if np.isfinite(a['cluster_age_myr']) else "?"
             print(f"    {i+1}. {a['cluster_name']:20s}  "
                   f"sep={a['min_sep_pc']:7.1f} pc  "
@@ -667,46 +633,30 @@ def _save_traceback_report(result, output_dir, ra, dec, rv, rv_err):
 
     candidates = result.get('candidates', [])
     if candidates:
-        lines.append(
-            f"{'Rank':>4s}  {'Cluster':20s}  {'MinSep(pc)':>10s}  "
-            f"{'TidalR(pc)':>10s}  {'TimeMyr':>8s}  {'Age(Myr)':>10s}  "
-            f"{'InTidal':>8s}  {'TimeOK':>7s}  {'Plausible':>10s}"
-        )
-        lines.append("-" * 110)
+        lines.append(f"{'Rank':>4s}  {'Cluster':20s}  {'MinSep(pc)':>10s}  "
+                      f"{'TidalR(pc)':>10s}  {'TimeMyr':>8s}  {'Age(Myr)':>10s}  "
+                      f"{'InTidal':>8s}")
+        lines.append("-" * 90)
         for i, a in enumerate(candidates, 1):
             age_str = f"{a['cluster_age_myr']:.0f}" if np.isfinite(a['cluster_age_myr']) else "?"
-            tidal_flag = "YES" if a['within_tidal'] else "no"
-            time_flag = "YES" if a.get('time_consistent') else "no"
-            plaus = "YES ***" if a.get('physically_plausible_host') else "no"
-            lines.append(
-                f"{i:4d}  {a['cluster_name']:20s}  "
-                f"{a['min_sep_pc']:10.1f}  {a['rtpc']:10.1f}  "
-                f"{a['min_sep_time_myr']:8.1f}  {age_str:>10s}  "
-                f"{tidal_flag:>8s}  {time_flag:>7s}  {plaus:>10s}"
-            )
+            tidal_flag = "YES ***" if a['within_tidal'] else "no"
+            lines.append(f"{i:4d}  {a['cluster_name']:20s}  "
+                          f"{a['min_sep_pc']:10.1f}  {a['rtpc']:10.1f}  "
+                          f"{a['min_sep_time_myr']:8.1f}  {age_str:>10s}  "
+                          f"{tidal_flag:>8s}")
     else:
         lines.append("  No candidates found.")
 
     lines.append("")
     best = result.get('best_match')
     if best:
-        basis = result.get('best_match_basis', '?')
         lines.append("## Best Match")
         lines.append(f"  Cluster: {best['cluster_name']}")
         lines.append(f"  Min separation: {best['min_sep_pc']:.1f} pc "
                       f"(tidal radius: {best['rtpc']:.1f} pc)")
         lines.append(f"  Time of closest approach: {best['min_sep_time_myr']:.1f} Myr ago")
-        lines.append(f"  Cluster age: {best['cluster_age_myr']:.1f} Myr"
-                      if np.isfinite(best['cluster_age_myr']) else "  Cluster age: unknown")
-        lines.append(f"  Within tidal radius: {'YES' if best['within_tidal'] else 'no'}")
-        lines.append(f"  Time consistent (approach < age): {'YES' if best.get('time_consistent') else 'NO'}")
-        if best.get('physically_plausible_host'):
-            lines.append("  ⇒ Physically plausible escape host (both spatial AND temporal filters pass).")
-        else:
-            lines.append("  ⇒ NOT a plausible escape host — closest-only match; cluster not yet formed at approach time OR outside tidal radius.")
-        lines.append(f"  Match basis: {basis}")
-        plausible = result.get('plausible_hosts', [])
-        lines.append(f"  Plausible-host count in 200 pc window: {len(plausible)}")
+        flag = "YES — likely escaped from this cluster!" if best['within_tidal'] else "No"
+        lines.append(f"  Within tidal radius: {flag}")
 
     path = os.path.join(output_dir, 'orbit_traceback.txt')
     with open(path, 'w', encoding='utf-8') as f:

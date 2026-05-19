@@ -178,8 +178,17 @@ def plot_combined_spectra(results, save_path=None, ra=None, dec=None):
             df = (fmax - fmin) * 0.1
             ax.set_ylim(fmin - df, fmax + df)
 
-    # x 轴紧凑到所有光谱的波长范围
-    w_valid = all_wave[np.isfinite(all_wave) & (all_wave > 0)]
+    # x 轴按真正的连续光谱范围收紧。SPHEREx 这类只有少数宽带点的
+    # 稀疏谱不再把 SDSS/DESI/HST 的可读范围拉到几万埃。
+    dense_wave = [
+        sp['wave'] for sp in spectra
+        if np.isfinite(sp['wave']).sum() >= 20
+    ]
+    if dense_wave:
+        x_wave = np.concatenate(dense_wave)
+    else:
+        x_wave = all_wave
+    w_valid = x_wave[np.isfinite(x_wave) & (x_wave > 0)]
     if len(w_valid) > 0:
         wmin, wmax = w_valid.min(), w_valid.max()
         dw = (wmax - wmin) * 0.02
@@ -210,6 +219,8 @@ def plot_combined_fold(results, save_path=None, ra=None, dec=None):
     """
     from .period_analysis import (
         _extract_lightcurve_data, _phase_bin_median,
+        _fit_harmonic_phase_curve, _evaluate_harmonic_phase_curve,
+        _harmonic_count_for_curve,
         analyze_folded_morphology)
 
     # 获取周期分析结果
@@ -270,29 +281,57 @@ def plot_combined_fold(results, save_path=None, ra=None, dec=None):
         label_str = curve['label']
         color = LC_COLORS.get(label_str, 'black')
         marker = LC_MARKERS.get(label_str, '.')
-        ms = 4 if len(t) > 100 else 6
+        ms = 5 if len(t) > 100 else 7
 
-        if me is not None and len(me) > 0:
-            ax.errorbar(phase, dm, yerr=me, fmt=marker,
-                        color=color, ms=ms, elinewidth=0.3,
-                        alpha=0.38, label=f'{label_str} (N={len(t)}, med={med:.2f})')
-            # 重复相位
-            ax.errorbar(phase + 1, dm, yerr=me, fmt=marker,
-                        color=color, ms=ms, elinewidth=0.3, alpha=0.15)
+        has_errors = (me is not None and len(me) > 0)
+        if has_errors:
+            if len(dm) > 6000:
+                ax.scatter(phase, dm, s=5.0, c=color, marker=marker,
+                           alpha=0.055,
+                           label=f'{label_str} (N={len(t)}, med={med:.2f})')
+                ax.scatter(phase + 1, dm, s=5.0, c=color, marker=marker,
+                           alpha=0.028)
+                rng = np.random.default_rng(12345)
+                idx = np.sort(rng.choice(len(dm), 6000, replace=False))
+                ax.errorbar(phase[idx], dm[idx], yerr=me[idx], fmt=marker,
+                            color=color, ms=3.4, elinewidth=0.25,
+                            alpha=0.18, capsize=0)
+                ax.errorbar(phase[idx] + 1, dm[idx], yerr=me[idx], fmt=marker,
+                            color=color, ms=3.4, elinewidth=0.25,
+                            alpha=0.09, capsize=0)
+            else:
+                ax.errorbar(phase, dm, yerr=me, fmt=marker,
+                            color=color, ms=ms, elinewidth=0.42,
+                            alpha=0.50, label=f'{label_str} (N={len(t)}, med={med:.2f})')
+                # 重复相位
+                ax.errorbar(phase + 1, dm, yerr=me, fmt=marker,
+                            color=color, ms=ms, elinewidth=0.42, alpha=0.22)
         else:
-            ax.scatter(phase, dm, s=ms**2, c=color, marker=marker,
-                       alpha=0.38, label=f'{label_str} (N={len(t)}, med={med:.2f})')
-            ax.scatter(phase + 1, dm, s=ms**2, c=color, marker=marker,
-                       alpha=0.15)
-        bx, by, counts = _phase_bin_median(phase, dm, n_bins=70)
+            if len(dm) > 5000:
+                size, alpha1, alpha2 = 5.0, 0.055, 0.028
+            elif len(dm) > 1000:
+                size, alpha1, alpha2 = 14.0, 0.22, 0.10
+            else:
+                size, alpha1, alpha2 = ms**2, 0.50, 0.22
+            ax.scatter(phase, dm, s=size, c=color, marker=marker,
+                       alpha=alpha1,
+                       label=f'{label_str} (N={len(t)}, med={med:.2f})')
+            ax.scatter(phase + 1, dm, s=size, c=color, marker=marker,
+                       alpha=alpha2)
+        fit = _fit_harmonic_phase_curve(
+            phase, dm, me, n_harmonics=_harmonic_count_for_curve(len(dm)))
+        if fit:
+            grid = np.linspace(0.0, 2.0, 800)
+            model = _evaluate_harmonic_phase_curve(fit, grid)
+            if model is not None:
+                ax.plot(grid, model, '-', color=color, lw=2.0, alpha=0.9)
+
+        bx, by, counts = _phase_bin_median(phase, dm, n_bins=55)
         if len(bx) >= 3:
-            ax.plot(bx, by, '-', color=color, lw=2.0, alpha=0.95)
-            ax.plot(bx + 1, by, '-', color=color, lw=2.0, alpha=0.95)
-        if morph and np.isfinite(morph.get('primary_dip_phase', np.nan)):
-            ax.axvline(morph['primary_dip_phase'], color=color,
-                       lw=0.6, ls='--', alpha=0.45)
-            ax.axvline(morph['primary_dip_phase'] + 1, color=color,
-                       lw=0.6, ls='--', alpha=0.45)
+            ax.scatter(bx, by, s=np.clip(counts * 1.5, 20, 72), c='white',
+                       edgecolors=color, linewidths=0.75, zorder=6)
+            ax.scatter(bx + 1, by, s=np.clip(counts * 1.5, 20, 72), c='white',
+                       edgecolors=color, linewidths=0.75, zorder=6)
         plotted += 1
 
     if plotted == 0:
@@ -306,14 +345,15 @@ def plot_combined_fold(results, save_path=None, ra=None, dec=None):
     ax.set_xlim(0, 2)
     ax.grid(True, alpha=0.3)
 
-    title = f'Phase-folded at P = {period:.6f} d (from {source})'
+    period_h = period * 24.0
+    title = f'Phase-folded at P = {period_h:.4f} h ({period:.6f} d; from {source})'
     if ra is not None:
         title += f'  RA={ra:.4f} DEC={dec:.4f}'
     ax.set_title(title, fontsize=13)
     ax.legend(fontsize=8, loc='best', ncol=2)
     fig.tight_layout()
     utils.save_and_close(fig, save_path)
-    print(f"  联合折叠: {plotted} bands, P={period:.6f}d -> {save_path}")
+    print(f"  联合折叠: {plotted} bands, P={period_h:.4f}h -> {save_path}")
     return fig
 
 

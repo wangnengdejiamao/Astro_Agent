@@ -497,6 +497,11 @@ def read_spectrum(path):
     wave = wave[valid][order]
     flux = flux[valid][order]
     error = error[valid][order] if error is not None else np.zeros_like(flux)
+    if len(wave) < 50:
+        raise ValueError(f'Too few usable 1D wavelength samples in {path}')
+    wave_span = float(np.nanmax(wave) - np.nanmin(wave))
+    if not np.isfinite(wave_span) or wave_span < 50.0:
+        raise ValueError(f'Unusable 1D wavelength solution in {path}')
     flux_col = str(fcol)
     clean_flux_col = _clean_key(flux_col)
     flux_unit = ('erg s^-1 cm^-2 A^-1'
@@ -1034,7 +1039,7 @@ def prepare_koa_download(ra=None, dec=None, target=None,
 
 
 def run_pypeit_reduction(pypeit_file, redux_path=None, extra_args=None,
-                         command='run_pypeit'):
+                         command='run_pypeit', timeout=None):
     """
     Run an existing PypeIt reduction file and return the subprocess result.
 
@@ -1056,7 +1061,8 @@ def run_pypeit_reduction(pypeit_file, redux_path=None, extra_args=None,
     env.setdefault('MPLCONFIGDIR', '/tmp')
     cwd = os.path.dirname(os.path.abspath(pypeit_file)) or None
     return subprocess.run(
-        cmd, check=True, capture_output=True, text=True, env=env, cwd=cwd)
+        cmd, check=True, capture_output=True, text=True, env=env, cwd=cwd,
+        timeout=timeout)
 
 
 def _fits_date(path):

@@ -50,7 +50,7 @@ def query_spectrum(ra, dec, radius_arcsec=config.SEARCH_RADIUS_ARCSEC):
     instrument_meta = _row_str('instrument')
     programname = _row_str('programname') or _row_str('programName')
     survey_name = _row_str('survey')
-    z = float(row.get('z', 0)) if 'z' in row.colnames else 0.0
+    z = float(row['z']) if 'z' in row.colnames else 0.0
     cls = _row_str('class')
     subcls = _row_str('subClass') or _row_str('subclass')
 

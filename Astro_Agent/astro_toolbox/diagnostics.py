@@ -25,6 +25,24 @@ OPTICAL_LINES = [
     ('Na D', 5892.0, 'Metal'),
 ]
 
+UV_LINES = [
+    ('Si IV 1393', 1393.76, 'UV resonance'),
+    ('Si IV 1402', 1402.77, 'UV resonance'),
+    ('C IV 1548', 1548.20, 'UV resonance'),
+    ('C IV 1550', 1550.77, 'UV resonance'),
+    ('He II 1640', 1640.42, 'UV helium'),
+    ('Al III 1854', 1854.72, 'UV metal'),
+    ('Al III 1862', 1862.79, 'UV metal'),
+    ('C III] 1909', 1908.73, 'UV semi-forbidden'),
+    ('Fe II 2344', 2344.21, 'UV metal'),
+    ('Fe II 2374', 2374.46, 'UV metal'),
+    ('Fe II 2382', 2382.76, 'UV metal'),
+    ('Fe II 2586', 2586.65, 'UV metal'),
+    ('Fe II 2600', 2600.17, 'UV metal'),
+    ('Mg II 2796', 2796.35, 'UV metal'),
+    ('Mg II 2803', 2803.53, 'UV metal'),
+]
+
 
 def _as_array(values):
     if values is None:
@@ -42,6 +60,35 @@ def _robust_sigma(values):
     if mad > 0:
         return 1.4826 * mad
     return np.nanstd(values)
+
+
+def _spectral_region(wave):
+    wmin = float(np.nanmin(wave))
+    wmax = float(np.nanmax(wave))
+    if wmax < 3200:
+        return 'uv'
+    if wmin < 3200 and wmax >= 3600:
+        return 'uv_optical_mixed'
+    if wmin <= 7000 and wmax >= 3600:
+        return 'optical'
+    if wmin > 7000:
+        return 'red_ir'
+    return 'unknown'
+
+
+def _coverage_flags(wave):
+    wmin = float(np.nanmin(wave))
+    wmax = float(np.nanmax(wave))
+    balmer = [6562.8, 4861.3, 4340.5, 4101.7]
+    n_balmer = sum(wmin <= line <= wmax for line in balmer)
+    return {
+        'has_uv_coverage': bool(wmin <= 2900 and wmax >= 1350),
+        'has_optical_coverage': bool(wmin <= 7000 and wmax >= 3600),
+        'has_balmer_coverage': bool(n_balmer >= 2),
+        'n_balmer_lines_covered': int(n_balmer),
+        'usable_for_optical_rv': bool(n_balmer >= 2),
+        'usable_for_wd_balmer_fit': bool(n_balmer >= 3),
+    }
 
 
 def _local_line_measurement(wave, flux, err, center, half_width=10.0):
@@ -179,6 +226,8 @@ def analyze_spectrum(wave, flux, err=None, survey='', metadata=None):
         'wavelength_min_A': float(np.nanmin(wave)),
         'wavelength_max_A': float(np.nanmax(wave)),
     })
+    result['spectral_region'] = _spectral_region(wave)
+    result.update(_coverage_flags(wave))
 
     flags = []
     if err is not None and len(err) == len(wave):
@@ -210,15 +259,23 @@ def analyze_spectrum(wave, flux, err=None, survey='', metadata=None):
     line_results = {}
     strong_emission = []
     strong_absorption = []
-    for name, rest, family in OPTICAL_LINES:
+    analyzable = []
+    line_catalog = [(name, rest, family, 'optical', 10.0)
+                    for name, rest, family in OPTICAL_LINES]
+    line_catalog.extend((name, rest, family, 'uv', 5.0)
+                        for name, rest, family in UV_LINES)
+    for name, rest, family, domain, half_width in line_catalog:
         center = rest * (1.0 + z)
-        if center < wave.min() + 20 or center > wave.max() - 20:
+        if center < wave.min() + half_width * 4 or center > wave.max() - half_width * 4:
             continue
-        meas = _local_line_measurement(wave, flux, err, center)
+        analyzable.append(name)
+        meas = _local_line_measurement(wave, flux, err, center,
+                                       half_width=half_width)
         if not meas:
             continue
         meas['rest_A'] = rest
         meas['family'] = family
+        meas['domain'] = domain
         line_results[name] = meas
         if meas['emission_snr'] >= 4.0 and meas['emission_ew_A'] >= 1.0:
             strong_emission.append(name)
@@ -226,6 +283,7 @@ def analyze_spectrum(wave, flux, err=None, survey='', metadata=None):
             strong_absorption.append(name)
 
     result['line_measurements'] = line_results
+    result['analyzable_lines'] = analyzable
     result['strong_emission_lines'] = strong_emission
     result['strong_absorption_lines'] = strong_absorption
     result['emission_flag'] = bool(strong_emission)
@@ -377,6 +435,13 @@ def save_spectral_diagnostics(diagnostics, output_dir):
             'n_points': diag.get('n_points'),
             'wavelength_min_A': diag.get('wavelength_min_A'),
             'wavelength_max_A': diag.get('wavelength_max_A'),
+            'spectral_region': diag.get('spectral_region'),
+            'has_uv_coverage': diag.get('has_uv_coverage'),
+            'has_optical_coverage': diag.get('has_optical_coverage'),
+            'has_balmer_coverage': diag.get('has_balmer_coverage'),
+            'n_balmer_lines_covered': diag.get('n_balmer_lines_covered'),
+            'usable_for_optical_rv': diag.get('usable_for_optical_rv'),
+            'usable_for_wd_balmer_fit': diag.get('usable_for_wd_balmer_fit'),
             'median_snr': diag.get('median_snr'),
             'emission_flag': diag.get('emission_flag'),
             'anomaly_flag': diag.get('anomaly_flag'),
@@ -384,10 +449,18 @@ def save_spectral_diagnostics(diagnostics, output_dir):
             'nonstellar_score': diag.get('nonstellar_score'),
             'likely_interpretation': diag.get('likely_interpretation'),
             'flags': ';'.join(diag.get('flags', [])),
+            'analyzable_lines': ';'.join(diag.get('analyzable_lines', [])),
             'strong_emission_lines': ';'.join(diag.get('strong_emission_lines', [])),
             'strong_absorption_lines': ';'.join(diag.get('strong_absorption_lines', [])),
         })
         lines.append(f'## {survey}')
+        if diag.get('spectral_region'):
+            lines.append(
+                f"  region: {diag.get('spectral_region')} "
+                f"({diag.get('wavelength_min_A', np.nan):.1f}-"
+                f"{diag.get('wavelength_max_A', np.nan):.1f} A)")
+        if diag.get('analyzable_lines'):
+            lines.append("  analyzable: " + ', '.join(diag['analyzable_lines']))
         lines.append(f"  interpretation: {diag.get('likely_interpretation', '')}")
         lines.append(f"  flags: {', '.join(diag.get('flags', [])) or 'none'}")
         if diag.get('strong_emission_lines'):

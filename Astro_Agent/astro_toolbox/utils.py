@@ -405,9 +405,9 @@ def _fetch_bibdetails_simbad(bibcodes):
                     row = r[0]
                     references.append({
                         'bibcode': bib,
-                        'title': str(row.get('title', '')).strip() if 'title' in r.colnames else '',
+                        'title': str(_row_get(row, 'title', '')).strip() if 'title' in r.colnames else '',
                         'authors': '',
-                        'journal': str(row.get('journal', '')).strip() if 'journal' in r.colnames else '',
+                        'journal': str(_row_get(row, 'journal', '')).strip() if 'journal' in r.colnames else '',
                         'year': bib[:4],
                         'abstract': '',
                         'url': f'https://ui.adsabs.harvard.edu/abs/{bib}',
@@ -429,9 +429,9 @@ def _fetch_bibdetails_simbad(bibcodes):
             bib = str(row['bibcode']).strip() if 'bibcode' in bib_info.colnames else ''
             references.append({
                 'bibcode': bib,
-                'title': str(row.get('title', '')).strip() if 'title' in bib_info.colnames else '',
+                'title': str(_row_get(row, 'title', '')).strip() if 'title' in bib_info.colnames else '',
                 'authors': '',
-                'journal': str(row.get('journal', '')).strip() if 'journal' in bib_info.colnames else '',
+                'journal': str(_row_get(row, 'journal', '')).strip() if 'journal' in bib_info.colnames else '',
                 'year': bib[:4] if bib else '',
                 'abstract': '',
                 'url': f'https://ui.adsabs.harvard.edu/abs/{bib}',
@@ -790,34 +790,52 @@ def plot_period_analysis(period_result, time, mag, magerr=None, save_path=None,
 
     P = period_result['best_period']
     fap = period_result['fap']
-    P_min = P * 24 * 60  # 换算为分钟，用于标注短周期
+    P_h = P * 24.0
+    P_min = P_h * 60.0
 
     fig, axes = plt.subplots(2, 1, figsize=(12, 8),
                               gridspec_kw={'height_ratios': [1, 1]})
 
     # 上图: 周期图
     ax1 = axes[0]
-    periods = period_result['periods']
-    power = period_result['power']
-    # 按周期排序绘图
-    sort_idx = np.argsort(periods)
-    ax1.plot(periods[sort_idx], power[sort_idx], 'k-', lw=0.6)
-    p_label = f'Best P = {P:.6f} d ({P_min:.2f} min)'
-    ax1.axvline(P, color='red', ls='--', lw=1.5, label=p_label)
-    # 标注谐波
-    for h in (2, 3):
-        ax1.axvline(P * h, color='orange', ls=':', lw=0.8, alpha=0.6,
-                     label=f'{h}P = {P*h:.4f} d' if h == 2 else None)
-        ax1.axvline(P / h, color='blue', ls=':', lw=0.8, alpha=0.6,
-                     label=f'P/{h} = {P/h:.4f} d' if h == 2 else None)
-    ax1.set_xlabel('Period (day)')
+    p_label = f'Best P = {P_h:.4f} h ({P:.6f} d; {P_min:.2f} min)'
     method = period_result.get('method', 'MHAOV')
-    ax1.set_ylabel(f'{method} Power')
-    ax1.set_xscale('log')
-    ax1.set_title(f'{title}  {method} Periodogram  (N={period_result["n_points"]}, '
+    periods = period_result.get('periods')
+    power = period_result.get('power')
+    if periods is not None and power is not None:
+        periods = np.asarray(periods, dtype=float)
+        periods_h = periods * 24.0
+        power = np.asarray(power, dtype=float)
+        # 按周期排序绘图
+        sort_idx = np.argsort(periods_h)
+        ax1.plot(periods_h[sort_idx], power[sort_idx], 'k-', lw=0.6)
+        ax1.axvline(P_h, color='red', ls='--', lw=1.5, label=p_label)
+        # 标注谐波
+        for h in (2, 3):
+            ax1.axvline(P_h * h, color='orange', ls=':', lw=0.8, alpha=0.6,
+                         label=f'{h}P = {P_h*h:.4f} h' if h == 2 else None)
+            ax1.axvline(P_h / h, color='blue', ls=':', lw=0.8, alpha=0.6,
+                         label=f'P/{h} = {P_h/h:.4f} h' if h == 2 else None)
+        ax1.set_xlabel('Period (hour)')
+        ax1.set_ylabel(f'{method} Power')
+        ax1.set_xscale('log')
+        ax1.legend(fontsize=9)
+        ax1.grid(True, alpha=0.3)
+    else:
+        ax1.axis('off')
+        note = period_result.get(
+            'fap_note',
+            'Native periodogram arrays are not stored for this method.')
+        two_p = period_result.get('two_period_day')
+        two_p_note = ''
+        if two_p is not None:
+            two_p_note = f'\n2P candidate = {two_p * 24.0:.4f} h ({two_p:.6f} d)'
+        ax1.text(
+            0.02, 0.72,
+            f'{method} period result\n{p_label}{two_p_note}\n{note}',
+            transform=ax1.transAxes, ha='left', va='top', fontsize=11)
+    ax1.set_title(f'{title}  {method} Periodogram  (N={period_result.get("n_points", len(time))}, '
                   f'FAP={fap:.2e})')
-    ax1.legend(fontsize=9)
-    ax1.grid(True, alpha=0.3)
 
     # 下图: 折叠光变曲线
     ax2 = axes[1]
@@ -828,18 +846,18 @@ def plot_period_analysis(period_result, time, mag, magerr=None, save_path=None,
     if magerr is not None:
         magerr = np.asarray(magerr, dtype=float)
         ax2.errorbar(phase, mag, yerr=magerr, fmt='.', color='black',
-                     markersize=3, elinewidth=0.3, alpha=0.5)
+                     markersize=5, elinewidth=0.45, alpha=0.58)
         ax2.errorbar(phase + 1, mag, yerr=magerr, fmt='.', color='gray',
-                     markersize=3, elinewidth=0.3, alpha=0.3)
+                     markersize=5, elinewidth=0.45, alpha=0.32)
     else:
-        ax2.scatter(phase, mag, s=3, c='black', alpha=0.5)
-        ax2.scatter(phase + 1, mag, s=3, c='gray', alpha=0.3)
+        ax2.scatter(phase, mag, s=16, c='black', alpha=0.58)
+        ax2.scatter(phase + 1, mag, s=16, c='gray', alpha=0.32)
 
     ax2.set_xlabel('Phase')
     ax2.set_ylabel('Magnitude')
     ax2.invert_yaxis()
     ax2.set_xlim(0, 2)
-    ax2.set_title(f'Phase-folded Light Curve  P = {P:.6f} day')
+    ax2.set_title(f'Phase-folded Light Curve  P = {P_h:.4f} h ({P:.6f} d)')
     ax2.grid(True, alpha=0.3)
 
     fig.tight_layout()

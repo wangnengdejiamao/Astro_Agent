@@ -11,6 +11,7 @@ HST (Hubble Space Telescope) 光谱与光变曲线
     lc = query_lightcurve(190.305, 2.596)
 """
 import os
+import json
 import numpy as np
 import pandas as pd
 from astropy.io import fits
@@ -27,6 +28,24 @@ HST_SPEC_INSTRUMENT_KEYWORDS = [
 
 # 光谱产品优先级 (高→低)
 _SPEC_PRODUCT_PRIORITY = ['X1DSUM', 'X1D', 'SX1']
+
+
+def _jsonable(value):
+    if isinstance(value, dict):
+        return {str(k): _jsonable(v) for k, v in value.items()}
+    if isinstance(value, (list, tuple, set)):
+        return [_jsonable(v) for v in value]
+    if isinstance(value, np.ndarray):
+        return [_jsonable(v) for v in value.tolist()]
+    if isinstance(value, (np.integer,)):
+        return int(value)
+    if isinstance(value, (np.floating,)):
+        if not np.isfinite(value):
+            return None
+        return float(value)
+    if isinstance(value, (str, int, float, bool)) or value is None:
+        return value
+    return str(value)
 
 
 def _setup_mast_proxy():
@@ -114,7 +133,7 @@ def _try_download_spectrum(obs_row, cache_dir, ra, dec):
     """尝试从单条观测记录下载并解析光谱"""
     from astroquery.mast import Observations
 
-    obs_id = str(obs_row.get('obs_id', '?'))
+    obs_id = str(utils._row_get(obs_row, 'obs_id', '?'))
     try:
         products = Observations.get_product_list(obs_row)
         if products is None or len(products) == 0:
@@ -228,7 +247,7 @@ def _parse_x1d(filepath, obs_row, ra, dec):
         prov = utils.build_provenance('HST', obs_row=obs_row, header=header,
                                       ra=ra, dec=dec)
 
-        return {
+        result = {
             'survey': 'HST',
             'ra': ra, 'dec': dec,
             'instrument': prov['instrument'],
@@ -245,6 +264,27 @@ def _parse_x1d(filepath, obs_row, ra, dec):
             'exptime_s': prov['exptime_s'],
             'provenance': prov,
         }
+        try:
+            from .diagnostics import analyze_spectrum
+            diag = analyze_spectrum(
+                wavelength,
+                flux,
+                error,
+                survey='HST',
+                metadata=result,
+            )
+            result['diagnostics'] = diag
+            result['spectral_region'] = diag.get('spectral_region')
+            result['usable_for_optical_rv'] = diag.get('usable_for_optical_rv')
+            result['usable_for_wd_balmer_fit'] = diag.get('usable_for_wd_balmer_fit')
+            result['analyzable_lines'] = diag.get('analyzable_lines', [])
+            result['strong_emission_lines'] = diag.get('strong_emission_lines', [])
+            result['strong_absorption_lines'] = diag.get('strong_absorption_lines', [])
+        except Exception:
+            result['spectral_region'] = ''
+            result['usable_for_optical_rv'] = False
+            result['usable_for_wd_balmer_fit'] = False
+        return result
 
 
 # ================================================================
@@ -489,18 +529,144 @@ def _find_col(df, candidates):
 #  绘图
 # ================================================================
 
-def plot_spectrum(result, save_path=None):
-    """绘制 HST 光谱"""
+def _median_bin_spectrum(wave, flux, err=None, bin_size=7):
+    """Median-bin a 1D spectrum for display without changing the saved data."""
+    wave = np.asarray(wave, dtype=float)
+    flux = np.asarray(flux, dtype=float)
+    err = np.asarray(err, dtype=float) if err is not None else None
+    good = np.isfinite(wave) & np.isfinite(flux)
+    if err is not None and len(err) == len(wave):
+        good &= np.isfinite(err)
+    wave = wave[good]
+    flux = flux[good]
+    err = err[good] if err is not None and len(err) == len(good) else None
+    if len(wave) < bin_size:
+        return wave, flux, err
+    n = len(wave) // bin_size
+    trim = n * bin_size
+    wb = np.nanmedian(wave[:trim].reshape(n, bin_size), axis=1)
+    fb = np.nanmedian(flux[:trim].reshape(n, bin_size), axis=1)
+    eb = None
+    if err is not None:
+        eb = np.nanmedian(err[:trim].reshape(n, bin_size), axis=1)
+    return wb, fb, eb
+
+
+def _robust_spectrum_ylim(flux, err=None, scale=1e-15, lower=1.0, upper=99.0):
+    """Percentile y limits so isolated bad pixels do not dominate the plot."""
+    f = np.asarray(flux, dtype=float) / scale
+    good = np.isfinite(f)
+    if err is not None:
+        e = np.asarray(err, dtype=float) / scale
+        if len(e) == len(f):
+            e_good = e[np.isfinite(e) & (e > 0)]
+            if len(e_good) >= 10:
+                err_cut = max(np.nanmedian(e_good) * 5.0,
+                              np.nanpercentile(e_good, 75))
+                good &= np.isfinite(e) & (e > 0) & (e <= err_cut)
+    f = f[good]
+    if len(f) < 10:
+        return None
+    lo, hi = np.nanpercentile(f, [lower, upper])
+    if not np.isfinite(lo + hi) or hi <= lo:
+        return None
+    pad = max((hi - lo) * 0.18, 3.0)
+    return lo - pad, hi + pad
+
+
+def _display_quality_mask(flux, err=None, scale=1e-15):
+    """Mask very noisy HST bins for plotting while keeping them in CSV files."""
+    f = np.asarray(flux, dtype=float)
+    good = np.isfinite(f)
+    if err is None:
+        return good
+    e = np.asarray(err, dtype=float) / scale
+    if len(e) != len(f):
+        return good
+    e_good = e[np.isfinite(e) & (e > 0)]
+    if len(e_good) < 10:
+        return good
+    err_cut = max(np.nanmedian(e_good) * 5.0, np.nanpercentile(e_good, 75))
+    good &= np.isfinite(e) & (e > 0) & (e <= err_cut)
+    return good
+
+
+def _annotate_uv_lines(ax, wave, diagnostics=None, scale=1e-15):
+    """Mark common UV transitions covered by an HST/COS spectrum."""
+    try:
+        from .diagnostics import UV_LINES
+    except Exception:
+        return
+    wmin, wmax = np.nanmin(wave), np.nanmax(wave)
+    line_meas = (diagnostics or {}).get('line_measurements', {})
+    y0, y1 = ax.get_ylim()
+    label_top = max(y0, y1)
+    label_bottom = min(y0, y1)
+    span = label_top - label_bottom
+    if not np.isfinite(span) or span <= 0:
+        return
+    for idx, (name, rest, _family) in enumerate(UV_LINES):
+        if rest < wmin or rest > wmax:
+            continue
+        meas = line_meas.get(name, {})
+        em_snr = meas.get('emission_snr', np.nan)
+        abs_snr = meas.get('absorption_snr', np.nan)
+        candidate = ((np.isfinite(em_snr) and em_snr >= 3.0)
+                     or (np.isfinite(abs_snr) and abs_snr >= 3.0))
+        color = '#b2182b' if candidate else '#2166ac'
+        alpha = 0.72 if candidate else 0.42
+        ax.axvline(rest, color=color, lw=0.8, ls='--', alpha=alpha, zorder=1)
+        y_text = label_top - span * (0.05 + 0.09 * (idx % 3))
+        ax.text(rest, y_text, name.replace(' ', '\n', 1),
+                rotation=90, ha='center', va='top', fontsize=7,
+                color=color, alpha=0.9 if candidate else 0.65)
+
+
+def plot_spectrum(result, save_path=None, log_flux=True,
+                  robust_ylim=True, annotate_lines=True,
+                  bin_size=7, figsize=(18, 6)):
+    """绘制 HST 光谱: 宽幅、鲁棒 y 轴、UV 谱线标注。"""
     if result is None:
         return None
     import matplotlib.pyplot as plt
 
-    fig, ax = utils.setup_spectrum_plot()
-    ax.plot(result['wavelength'], result['flux'], 'k-', lw=0.6, label='Flux')
-    ax.fill_between(result['wavelength'],
-                    result['flux'] - result['error'],
-                    result['flux'] + result['error'],
-                    color='gray', alpha=0.2)
+    wave = np.asarray(result['wavelength'], dtype=float)
+    flux = np.asarray(result['flux'], dtype=float)
+    err = np.asarray(result.get('error', np.zeros_like(flux)), dtype=float)
+    scale = 1e-15
+    fig, ax = plt.subplots(figsize=figsize)
+    wb, fb, eb = _median_bin_spectrum(wave, flux, err, bin_size=bin_size)
+    native_good = _display_quality_mask(flux, err=err, scale=scale)
+    bin_good = _display_quality_mask(fb, err=eb, scale=scale)
+    ax.plot(wave[native_good], flux[native_good] / scale,
+            color='0.70', lw=0.35, alpha=0.50,
+            label='native pixels (display-quality)')
+    ax.plot(wb[bin_good], fb[bin_good] / scale, color='black', lw=1.35,
+            label=f'{bin_size}-pixel median')
+    if eb is not None and len(eb) == len(wb):
+        ax.fill_between(wb[bin_good],
+                        (fb[bin_good] - eb[bin_good]) / scale,
+                        (fb[bin_good] + eb[bin_good]) / scale,
+                        color='0.45', alpha=0.14, lw=0,
+                        label='median error')
+    if robust_ylim:
+        ylim = _robust_spectrum_ylim(
+            fb if len(fb) else flux,
+            err=eb if eb is not None else err,
+            scale=scale)
+        if ylim:
+            ax.set_ylim(*ylim)
+    if log_flux:
+        linthresh = 0.8
+        finite_err = np.asarray(eb if eb is not None else err, dtype=float) / scale
+        finite_err = finite_err[np.isfinite(finite_err) & (finite_err > 0)]
+        if len(finite_err):
+            linthresh = float(np.clip(np.nanmedian(finite_err), 0.2, 8.0))
+        ax.set_yscale('symlog', linthresh=linthresh, linscale=0.7)
+
+    if annotate_lines:
+        _annotate_uv_lines(ax, wave, result.get('diagnostics'), scale=scale)
+
     prov = result.get('provenance', {})
     title_lines = [f"HST {result['instrument']} Spectrum"]
     if prov.get('proposal_id'):
@@ -513,13 +679,17 @@ def plot_spectrum(result, save_path=None):
         obs_meta.append(prov['obs_date_utc'][:19])
     obs_meta.append(f"obs_id={result['obs_id']}")
     obs_meta.append(f"MJD={result.get('obs_mjd', 0):.1f}")
+    if result.get('spectral_region'):
+        obs_meta.append(f"region={result.get('spectral_region')}")
+    if result.get('diagnostics', {}).get('median_snr') is not None:
+        obs_meta.append(f"S/N~{result['diagnostics'].get('median_snr'):.1f}")
     title_lines.append('  '.join(obs_meta))
-    ax.set_title('\n'.join(title_lines), fontsize=10)
-    ax.set_ylabel('Flux (erg/s/cm$^2$/A)')
-    ax.legend()
-
-    # 轴范围紧凑到光谱数据
-    utils.set_spectrum_axes(ax, result['wavelength'], result['flux'])
+    ax.set_title('\n'.join(title_lines), fontsize=11)
+    ax.set_xlabel('Observed wavelength (A)')
+    ax.set_ylabel(r'$F_\lambda$  ($10^{-15}$ erg s$^{-1}$ cm$^{-2}$ A$^{-1}$)')
+    ax.set_xlim(float(np.nanmin(wave)), float(np.nanmax(wave)))
+    ax.grid(True, which='both', alpha=0.22)
+    ax.legend(loc='upper right', fontsize=9, frameon=True)
 
     fig.tight_layout()
     utils.save_and_close(fig, save_path)
@@ -577,6 +747,21 @@ def save_spectrum_csv(result, output_dir):
     csv_path = utils.write_csv(df, output_dir, 'hst_spectrum.csv')
     if prov:
         utils.write_provenance_json(prov, output_dir, 'hst_spectrum_provenance.json')
+    diag = (result or {}).get('diagnostics')
+    if diag:
+        diag_path = os.path.join(output_dir, 'hst_spectrum_diagnostics.json')
+        with open(diag_path, 'w', encoding='utf-8') as fh:
+            json.dump(_jsonable(diag), fh, indent=2, ensure_ascii=False)
+        line_rows = []
+        for name, meas in diag.get('line_measurements', {}).items():
+            row = {'line': name}
+            row.update(meas)
+            row['is_strong_emission'] = name in diag.get('strong_emission_lines', [])
+            row['is_strong_absorption'] = name in diag.get('strong_absorption_lines', [])
+            line_rows.append(row)
+        if line_rows:
+            utils.write_csv(pd.DataFrame(line_rows), output_dir,
+                            'hst_line_measurements.csv')
     return csv_path
 
 

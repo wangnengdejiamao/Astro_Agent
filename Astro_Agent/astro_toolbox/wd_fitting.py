@@ -50,6 +50,17 @@ BALMER_LINES = {
     'H-zeta':   3890.16,
 }
 
+# Literature WD atmospheric fits usually use continuum-normalized Balmer line
+# profiles, not the absolute flux-calibrated spectrum.  For J1529+2928 the
+# published fits are H-beta through H8, so keep that line set explicit.
+BALMER_PROFILE_LINES = {
+    'H-beta':   4862.68,
+    'H-gamma':  4341.68,
+    'H-delta':  4102.89,
+    'H-epsilon': 3971.20,
+    'H8':       3890.16,
+}
+
 # He I 特征线 (DA vs DB 分类用)
 HE_I_LINES = {
     'HeI_4026':  4026.2,
@@ -71,14 +82,159 @@ def _load_koester2():
     return _load_koester2_templates()
 
 
-def _get_model_grid_params():
-    """返回模版覆盖的 (teff_list, logg_list) 唯一值排序列表"""
-    templates = _load_koester2()
+_NN_WD_CACHE = {}
+
+
+def _nn_model_dir(kind):
+    """Return the local DA/DB neural-network WD model directory."""
+    kind = str(kind).upper()
+    parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+    default = os.path.join(parent, 'data', f'{kind}WDmodel')
+    env_name = f'{kind}WD_NN_MODEL_DIR'
+    return os.environ.get(env_name, default)
+
+
+def _coerce_wavelength_angstrom(wavelength):
+    """
+    Convert a model wavelength array to Angstrom when the unit is obvious.
+
+    The supplied DA/DB grids have ranges 899-29992 and 3199-9997, i.e. Angstrom.
+    This helper keeps a guardrail for future grids saved in nm or micron.
+    """
+    wave = np.asarray(wavelength, dtype=np.float64)
+    finite = wave[np.isfinite(wave)]
+    if finite.size == 0:
+        return wave, 'unknown'
+    wmax = float(np.nanmax(finite))
+    wmed = float(np.nanmedian(finite))
+    if 100.0 <= wmed <= 300000.0 and wmax > 1000.0:
+        return wave, 'Angstrom'
+    if 100.0 <= wmed <= 3000.0:
+        return wave * 10.0, 'nm->Angstrom'
+    if 0.05 <= wmed <= 30.0:
+        return wave * 1.0e4, 'micron->Angstrom'
+    return wave, 'unknown'
+
+
+def load_nn_wd_templates(specclass='DA', model_dir=None):
+    """
+    Load local neural-network WD spectral grids from ``*_x.npy``, ``*_y.npy``,
+    and ``*_wl.npy``.
+
+    Returns
+    -------
+    dict
+        ``{(teff, logg): {'wavelength', 'flux', 'spectral_type',
+        'model_source', 'wavelength_unit', 'flux_unit'}}``.
+
+    Notes
+    -----
+    The checked local grids are saved on an Angstrom wavelength scale.  The flux
+    arrays are surface-like ``f_lambda`` spectra.  Observed SDSS/DESI spectra in
+    this toolbox are usually stored in survey units of ``1e-17 erg s-1 cm-2 A-1``;
+    radius checks therefore convert the fitted scale before using
+    ``R = d sqrt(scale)``.
+    """
+    kind = str(specclass or 'DA').upper()
+    if kind.startswith('DA'):
+        kind = 'DA'
+    elif kind.startswith('DB'):
+        kind = 'DB'
+    else:
+        return {}
+
+    if model_dir is None:
+        model_dir = _nn_model_dir(kind)
+    cache_key = (kind, os.path.abspath(model_dir))
+    if cache_key in _NN_WD_CACHE:
+        return _NN_WD_CACHE[cache_key]
+
+    x_path = os.path.join(model_dir, f'{kind}_x.npy')
+    y_path = os.path.join(model_dir, f'{kind}_y.npy')
+    wl_path = os.path.join(model_dir, f'{kind}_wl.npy')
+    if not (os.path.exists(x_path) and os.path.exists(y_path)
+            and os.path.exists(wl_path)):
+        _NN_WD_CACHE[cache_key] = {}
+        return {}
+
+    labels = np.load(x_path)
+    flux_grid = np.load(y_path)
+    wavelength, wl_unit = _coerce_wavelength_angstrom(np.load(wl_path))
+
+    labels = np.asarray(labels, dtype=np.float64)
+    flux_grid = np.asarray(flux_grid, dtype=np.float64)
+    if labels.ndim != 2 or labels.shape[1] < 2:
+        _NN_WD_CACHE[cache_key] = {}
+        return {}
+    if flux_grid.ndim != 2 or flux_grid.shape[0] != labels.shape[0]:
+        _NN_WD_CACHE[cache_key] = {}
+        return {}
+    if flux_grid.shape[1] != wavelength.size:
+        _NN_WD_CACHE[cache_key] = {}
+        return {}
+
+    order = np.argsort(wavelength)
+    wavelength = wavelength[order]
+    templates = {}
+    for row, flux in zip(labels, flux_grid):
+        teff = float(row[0])
+        logg = float(row[1])
+        fl = np.asarray(flux, dtype=np.float64)[order]
+        good = np.isfinite(wavelength) & np.isfinite(fl)
+        if np.sum(good) < 100:
+            continue
+        templates[(teff, logg)] = {
+            'wavelength': wavelength[good],
+            'flux': fl[good],
+            'spectral_type': kind,
+            'model_source': f'NN_{kind}',
+            'model_dir': model_dir,
+            'wavelength_unit': wl_unit,
+            'flux_unit': 'surface_f_lambda_cgs_like',
+        }
+
+    _NN_WD_CACHE[cache_key] = templates
+    return templates
+
+
+def _grid_params_from_templates(templates):
     if not templates:
         return [], []
-    teffs = sorted(set(k[0] for k in templates))
-    loggs = sorted(set(k[1] for k in templates))
+    teffs = sorted(set(float(k[0]) for k in templates))
+    loggs = sorted(set(float(k[1]) for k in templates))
     return teffs, loggs
+
+
+def _resolve_template_grid(model_grid='auto', spectral_type='DA'):
+    """
+    Resolve the WD template source.
+
+    ``auto`` prefers the local NN DA/DB grids and falls back to Koester2.
+    """
+    label = str(model_grid or 'auto').lower()
+    stype = str(spectral_type or 'DA').upper()
+    kind = 'DB' if stype.startswith('DB') else 'DA'
+
+    if label in ('auto', 'nn', 'nn_da', 'nn_db', 'neural', 'neural_network'):
+        nn_kind = 'DB' if label == 'nn_db' else ('DA' if label == 'nn_da' else kind)
+        templates = load_nn_wd_templates(nn_kind)
+        if templates:
+            teffs, loggs = _grid_params_from_templates(templates)
+            return templates, teffs, loggs, f'NN_{nn_kind}'
+        if label not in ('auto', 'nn', 'neural', 'neural_network'):
+            return {}, [], [], f'NN_{nn_kind}'
+
+    templates = _load_koester2()
+    teffs, loggs = _grid_params_from_templates(templates)
+    return templates, teffs, loggs, 'Koester2'
+
+
+def _get_model_grid_params(templates=None, model_grid='auto',
+                           spectral_type='DA'):
+    """返回模版覆盖的 (teff_list, logg_list) 唯一值排序列表"""
+    if templates is None:
+        templates, _, _, _ = _resolve_template_grid(model_grid, spectral_type)
+    return _grid_params_from_templates(templates)
 
 
 # ==================================================================
@@ -266,7 +422,282 @@ def _chi2_single(wave_obs, flux_obs, err_obs, wave_model, flux_model):
     return chi2_red, scale, n_dof
 
 
-def fit_single_wd(wave, flux, err=None, line_only=False):
+def _infer_observed_flux_unit(flux):
+    """
+    Infer the multiplier that converts stored spectral flux to cgs f_lambda.
+
+    SDSS/DESI/LAMOST style spectra commonly store flux in units of
+    1e-17 erg s-1 cm-2 A-1, while HST and synthetic products may already be
+    cgs.  This is only used for physical radius validation, never for the
+    chi-squared shape fit.
+    """
+    arr = np.asarray(flux, dtype=float)
+    arr = np.abs(arr[np.isfinite(arr)])
+    arr = arr[arr > 0]
+    if arr.size == 0:
+        return 1.0, 'unknown'
+    med = float(np.nanmedian(arr))
+    if med > 1e-8:
+        return 1.0e-17, 'survey_1e-17_flam'
+    return 1.0, 'cgs_flam'
+
+
+def _distance_scale_radius(scale, parallax_mas, observed_flux_unit=1.0):
+    """Convert a fitted surface-flux scale into an implied radius."""
+    try:
+        scale = float(scale)
+        parallax_mas = float(parallax_mas)
+        observed_flux_unit = float(observed_flux_unit)
+    except (TypeError, ValueError):
+        return None
+    if (not np.isfinite(scale) or scale <= 0
+            or not np.isfinite(parallax_mas) or parallax_mas <= 0
+            or not np.isfinite(observed_flux_unit) or observed_flux_unit <= 0):
+        return None
+    dist_pc = 1000.0 / parallax_mas
+    dist_cm = dist_pc * 3.085677581491367e18
+    physical_scale = scale * observed_flux_unit
+    if physical_scale <= 0:
+        return None
+    radius_rsun = dist_cm * np.sqrt(physical_scale) / R_SUN_CM
+    return {
+        'distance_pc': dist_pc,
+        'physical_scale': physical_scale,
+        'radius_rsun': radius_rsun,
+    }
+
+
+def attach_distance_scale_check(fit_result, parallax_mas, observed_flux,
+                                expected_radius_rsun=None):
+    """
+    Attach a Gaia-distance sanity check to a WD spectral fit result.
+
+    For NN/Koester surface-flux templates, the fitted scale should be roughly
+    ``(R/d)^2`` after converting stored survey fluxes to cgs units.
+    """
+    if not fit_result or parallax_mas is None:
+        return fit_result
+    flux_unit, flux_unit_label = _infer_observed_flux_unit(observed_flux)
+    radius = _distance_scale_radius(
+        fit_result.get('scale'), parallax_mas,
+        observed_flux_unit=flux_unit)
+    if radius is None:
+        return fit_result
+    fit_result['scale_observed_flux_unit'] = flux_unit
+    fit_result['scale_observed_flux_unit_label'] = flux_unit_label
+    fit_result['scale_physical_factor'] = radius['physical_scale']
+    fit_result['scale_distance_pc'] = radius['distance_pc']
+    fit_result['scale_radius_rsun'] = radius['radius_rsun']
+    note = 'scale converted with stored flux unit before R=d*sqrt(scale)'
+    if expected_radius_rsun is not None and np.isfinite(expected_radius_rsun):
+        ratio = radius['radius_rsun'] / expected_radius_rsun
+        fit_result['scale_radius_ratio_to_expected'] = ratio
+        fit_result['scale_radius_ok'] = bool(0.35 <= ratio <= 2.8)
+        note += f'; ratio_to_expected={ratio:.3f}'
+    else:
+        fit_result['scale_radius_ok'] = bool(0.003 <= radius['radius_rsun'] <= 0.05)
+    fit_result['scale_unit_note'] = note
+    return fit_result
+
+
+def _normalize_line_segment(wave, flux, err, center, half_width=80.0):
+    """Extract one Balmer line and divide by a local linear continuum."""
+    wave = np.asarray(wave, dtype=float)
+    flux = np.asarray(flux, dtype=float)
+    err = np.asarray(err, dtype=float) if err is not None else None
+    min_points = 8 if err is None else 20
+    mask = ((wave >= center - half_width) & (wave <= center + half_width)
+            & np.isfinite(wave) & np.isfinite(flux))
+    if err is not None and len(err) == len(wave):
+        mask &= np.isfinite(err) & (err > 0)
+    if np.sum(mask) < min_points:
+        return None
+
+    x = wave[mask] - center
+    y = flux[mask]
+    e = err[mask] if err is not None and len(err) == len(wave) else None
+    side = np.abs(x) >= 0.55 * half_width
+    if np.sum(side) >= max(4, min_points // 2):
+        try:
+            if e is not None:
+                wt = 1.0 / np.maximum(e[side], np.nanmedian(e[side]))**2
+                coeff = np.polyfit(x[side], y[side], 1, w=np.sqrt(wt))
+            else:
+                coeff = np.polyfit(x[side], y[side], 1)
+            cont = np.polyval(coeff, x)
+        except Exception:
+            cont = np.full_like(y, np.nanmedian(y[side]))
+    else:
+        cont = np.full_like(y, np.nanmedian(y))
+    fallback = np.nanmedian(y[np.isfinite(y)])
+    cont = np.where(np.isfinite(cont) & (np.abs(cont) > 0), cont, fallback)
+    if not np.isfinite(fallback) or fallback == 0:
+        return None
+
+    norm = y / cont
+    norm_err = None
+    if e is not None:
+        norm_err = np.abs(e / cont)
+    good = np.isfinite(x) & np.isfinite(norm)
+    if norm_err is not None:
+        good &= np.isfinite(norm_err) & (norm_err > 0)
+    if np.sum(good) < min_points:
+        return None
+    return x[good], norm[good], norm_err[good] if norm_err is not None else None
+
+
+def fit_balmer_line_profiles(wave, flux, err=None, rv_grid=None,
+                             half_width=50.0, lines=None,
+                             teff_prior=None, teff_prior_sigma=3000.0,
+                             model_grid='auto', spectral_type='DA'):
+    """
+    Fit continuum-normalized Balmer profiles H-beta through H8.
+
+    This mirrors the usual WD atmospheric fitting workflow better than a
+    full-spectrum flux fit: each Balmer line is locally continuum-normalized,
+    the model grid is normalized the same way, and a coarse photospheric
+    velocity grid is searched so line centers do not bias log g.
+    """
+    templates, teffs, loggs, model_source = _resolve_template_grid(
+        model_grid, spectral_type)
+    if not templates:
+        return None
+    if not teffs:
+        return None
+
+    lines = lines or BALMER_PROFILE_LINES
+    if rv_grid is None:
+        rv_grid = np.arange(-350.0, 351.0, 25.0)
+
+    wave = np.asarray(wave, dtype=float)
+    flux = np.asarray(flux, dtype=float)
+    err = np.asarray(err, dtype=float) if err is not None else None
+    finite = np.isfinite(wave) & np.isfinite(flux)
+    if err is not None and len(err) == len(wave):
+        finite &= np.isfinite(err) & (err > 0)
+    wave = wave[finite]
+    flux = flux[finite]
+    err = err[finite] if err is not None and len(err) == len(finite) else None
+    if len(wave) < 100:
+        return None
+
+    chi2_grid = {}
+    best = None
+    best_score = np.inf
+    best_chi2 = np.inf
+    best_scale = 0.0
+    best_model_wave = None
+    best_model_flux = None
+
+    # Pre-normalize the model profiles once per template/line.
+    model_profiles = {}
+    for key, tmpl in templates.items():
+        per_line = {}
+        for line_name, center in lines.items():
+            prof = _normalize_line_segment(
+                tmpl['wavelength'], tmpl['flux'], None, center,
+                half_width=half_width)
+            if prof is not None:
+                per_line[line_name] = prof[:2]
+        if per_line:
+            model_profiles[key] = per_line
+
+    for rv in rv_grid:
+        rest_wave = wave / (1.0 + rv / C_KMS)
+        obs_profiles = {}
+        for line_name, center in lines.items():
+            prof = _normalize_line_segment(
+                rest_wave, flux, err, center, half_width=half_width)
+            if prof is not None:
+                obs_profiles[line_name] = prof
+        if len(obs_profiles) < 3:
+            continue
+
+        for key, per_line in model_profiles.items():
+            chi2 = 0.0
+            n_pix = 0
+            used = []
+            for line_name, (x_obs, f_obs, e_obs) in obs_profiles.items():
+                if line_name not in per_line:
+                    continue
+                x_mod, f_mod = per_line[line_name]
+                model_at_obs = np.interp(x_obs, x_mod, f_mod,
+                                         left=np.nan, right=np.nan)
+                good = np.isfinite(model_at_obs) & np.isfinite(f_obs)
+                if np.sum(good) < 15:
+                    continue
+                if e_obs is not None:
+                    e = np.asarray(e_obs, dtype=float)
+                    e = np.where(np.isfinite(e) & (e > 0), e, np.nanmedian(e[good]))
+                else:
+                    e = np.full_like(f_obs, 0.03)
+                e = np.maximum(e, 0.02)
+                resid = f_obs[good] - model_at_obs[good]
+                chi2 += float(np.sum((resid / e[good]) ** 2))
+                n_pix += int(np.sum(good))
+                used.append(line_name)
+            if n_pix < 80 or len(set(used)) < 3:
+                continue
+            chi2_red = chi2 / max(n_pix - 3, 1)
+            prev = chi2_grid.get(key, np.inf)
+            if chi2_red < prev:
+                chi2_grid[key] = chi2_red
+            score = chi2_red
+            if teff_prior is not None and teff_prior_sigma:
+                try:
+                    sigma = max(float(teff_prior_sigma), 500.0)
+                    score += ((float(key[0]) - float(teff_prior)) / sigma) ** 2
+                except (TypeError, ValueError):
+                    pass
+            if score < best_score:
+                tmpl = templates[key]
+                # Give the plotting/reporting code a scaled full model too.
+                chi2_full, scale, _ = _chi2_single(
+                    wave, flux, err, tmpl['wavelength'], tmpl['flux'])
+                if not np.isfinite(scale) or scale <= 0:
+                    scale = 1.0
+                best_score = score
+                best_chi2 = chi2_red
+                best = (key, rv, sorted(set(used)), n_pix)
+                best_scale = scale
+                best_model_wave = tmpl['wavelength'] * (1.0 + rv / C_KMS)
+                best_model_flux = tmpl['flux'] * scale
+
+    if best is None:
+        return None
+
+    (t_best, g_best), rv_best, lines_used, n_pix = best
+    teff_err = _estimate_1d_error(chi2_grid, teffs, loggs, axis='teff',
+                                  best_t=t_best, best_g=g_best)
+    logg_err = _estimate_1d_error(chi2_grid, teffs, loggs, axis='logg',
+                                  best_t=t_best, best_g=g_best)
+    return {
+        'teff': t_best,
+        'logg': g_best,
+        'chi2_red': best_chi2,
+        'scale': best_scale,
+        'teff_err': teff_err,
+        'logg_err': logg_err,
+        'chi2_grid': chi2_grid,
+        'best_model_wave': best_model_wave,
+        'best_model_flux': best_model_flux,
+        'rv_kms': float(rv_best),
+        'n_profile_pixels': int(n_pix),
+        'lines_used': lines_used,
+        'method': 'Balmer_profile_Hbeta_to_H8',
+        'model_grid': model_source,
+        'spectral_type': spectral_type,
+        'teff_grid': teffs,
+        'logg_grid': loggs,
+        'fit_score': best_score,
+        'teff_prior': teff_prior,
+        'teff_prior_sigma': teff_prior_sigma if teff_prior is not None else None,
+    }
+
+
+def fit_single_wd(wave, flux, err=None, line_only=False,
+                  teff_prior=None, teff_prior_sigma=3000.0,
+                  model_grid='auto', spectral_type='DA'):
     """
     对 WD 光谱进行 Koester2 全网格 chi-squared 拟合.
 
@@ -288,13 +719,19 @@ def fit_single_wd(wave, flux, err=None, line_only=False):
         best_model_wave, best_model_flux,  (scaled model spectrum)
     }
     """
-    templates = _load_koester2()
+    templates, teffs, loggs, model_source = _resolve_template_grid(
+        model_grid, spectral_type)
     if not templates:
         return None
 
-    teffs, loggs = _get_model_grid_params()
     if not teffs:
         return None
+
+    if line_only:
+        return fit_balmer_line_profiles(
+            wave, flux, err, teff_prior=teff_prior,
+            teff_prior_sigma=teff_prior_sigma,
+            model_grid=model_grid, spectral_type=spectral_type)
 
     # 预处理
     if line_only:
@@ -345,6 +782,10 @@ def fit_single_wd(wave, flux, err=None, line_only=False):
         'chi2_grid': chi2_grid,
         'best_model_wave': best_model_wave,
         'best_model_flux': best_model_flux,
+        'model_grid': model_source,
+        'spectral_type': spectral_type,
+        'teff_grid': teffs,
+        'logg_grid': loggs,
     }
 
 
@@ -389,7 +830,8 @@ def _estimate_1d_error(chi2_grid, teffs, loggs, axis, best_t, best_g):
 #  SED 拟合 (测光点 vs Koester2 model)
 # ==================================================================
 
-def fit_sed(photometry, parallax_mas):
+def fit_sed(photometry, parallax_mas, model_grid='auto',
+            spectral_type='DA'):
     """
     宽波段 SED 拟合: 用 Koester2 合成测光与观测测光比较.
 
@@ -411,7 +853,8 @@ def fit_sed(photometry, parallax_mas):
     if not photometry or parallax_mas <= 0:
         return None
 
-    templates = _load_koester2()
+    templates, _, _, model_source = _resolve_template_grid(
+        model_grid, spectral_type)
     if not templates:
         return None
 
@@ -437,39 +880,93 @@ def fit_sed(photometry, parallax_mas):
     obs_fluxes = np.array([d['flux'] for d in obs_data])
     obs_errs = np.array([d['err'] for d in obs_data])
 
+    def _model_flux_at_bands(tw, tf, waves):
+        """Interpolate inside the grid and use an RJ tail for redder bands."""
+        tw = np.asarray(tw, dtype=np.float64)
+        tf = np.asarray(tf, dtype=np.float64)
+        waves = np.asarray(waves, dtype=np.float64)
+        good = np.isfinite(tw) & np.isfinite(tf) & (tf > 0)
+        if np.sum(good) < 5:
+            return (np.full_like(waves, np.nan, dtype=np.float64),
+                    np.zeros_like(waves, dtype=bool),
+                    np.zeros_like(waves, dtype=bool))
+
+        tw = tw[good]
+        tf = tf[good]
+        order = np.argsort(tw)
+        tw = tw[order]
+        tf = tf[order]
+
+        model = np.full_like(waves, np.nan, dtype=np.float64)
+        in_grid = (waves >= tw[0]) & (waves <= tw[-1])
+        if np.any(in_grid):
+            model[in_grid] = np.interp(waves[in_grid], tw, tf)
+
+        red_tail = waves > tw[-1]
+        if np.any(red_tail):
+            tail_mask = tw >= max(tw[-1] * 0.75, tw[-1] - 5000.0)
+            if np.sum(tail_mask) < 5:
+                tail_mask = np.arange(len(tw)) >= max(len(tw) - 50, 0)
+            tail_norm = np.nanmedian(tf[tail_mask] * tw[tail_mask] ** 4)
+            if np.isfinite(tail_norm) and tail_norm > 0:
+                model[red_tail] = tail_norm / waves[red_tail] ** 4
+
+        return model, in_grid, red_tail
+
     # 遍历模版网格
     best_chi2 = np.inf
     best_params = None
     best_scale = 0.0
+    best_chi2_all = np.nan
+    best_model_fluxes = None
+    best_fit_mask = None
+    best_in_grid = None
+    best_red_tail = None
 
     for (t, g), tmpl in templates.items():
         tw = tmpl['wavelength']
         tf = tmpl['flux']  # Eddington flux at stellar surface (erg/s/cm^2/A)
 
-        # 在各测光波段处插值模版 flux
-        f_interp = interp1d(tw, tf, kind='linear', bounds_error=False, fill_value=0)
-        model_fluxes = f_interp(obs_waves)
+        model_fluxes, in_grid, red_tail = _model_flux_at_bands(tw, tf, obs_waves)
 
-        if np.all(model_fluxes <= 0):
+        fit_mask = in_grid & np.isfinite(model_fluxes) & (model_fluxes > 0)
+        if np.sum(fit_mask) < 3:
+            # Fallback for sparse SEDs: allow the RJ tail, but never a zero
+            # fill-value outside the template grid.
+            fit_mask = np.isfinite(model_fluxes) & (model_fluxes > 0)
+
+        if np.sum(fit_mask) < 3:
             continue
 
         # 缩放因子 = (R/d)^2, R=stellar radius
         # scale = sum(w * obs * model) / sum(w * model^2)
-        w = 1.0 / obs_errs**2
-        denom = np.sum(w * model_fluxes**2)
+        w = 1.0 / obs_errs[fit_mask]**2
+        denom = np.sum(w * model_fluxes[fit_mask]**2)
         if denom <= 0:
             continue
-        scale = np.sum(w * obs_fluxes * model_fluxes) / denom
+        scale = np.sum(w * obs_fluxes[fit_mask] * model_fluxes[fit_mask]) / denom
 
-        residual = obs_fluxes - scale * model_fluxes
+        residual = obs_fluxes[fit_mask] - scale * model_fluxes[fit_mask]
         chi2 = np.sum(w * residual**2)
-        ndof = max(len(obs_data) - 2, 1)
+        ndof = max(np.sum(fit_mask) - 2, 1)
         chi2_red = chi2 / ndof
+        all_mask = np.isfinite(model_fluxes) & (model_fluxes > 0)
+        if np.any(all_mask):
+            all_resid = obs_fluxes[all_mask] - scale * model_fluxes[all_mask]
+            all_chi2 = np.sum((all_resid / obs_errs[all_mask]) ** 2)
+            chi2_all = all_chi2 / max(np.sum(all_mask) - 2, 1)
+        else:
+            chi2_all = np.nan
 
         if chi2_red < best_chi2:
             best_chi2 = chi2_red
             best_params = (t, g)
             best_scale = scale
+            best_chi2_all = chi2_all
+            best_model_fluxes = model_fluxes
+            best_fit_mask = fit_mask
+            best_in_grid = in_grid
+            best_red_tail = red_tail
 
     if best_params is None:
         return None
@@ -479,13 +976,18 @@ def fit_sed(photometry, parallax_mas):
     R_Rsun = R_cm / R_SUN_CM
     angular_radius = np.sqrt(max(best_scale, 0))  # radians
 
-    # 合成测光 (mag)
+    # 合成测光 (mag) + IR excess diagnostics.
     best_tmpl = templates[best_params]
-    f_interp = interp1d(best_tmpl['wavelength'], best_tmpl['flux'],
-                        kind='linear', bounds_error=False, fill_value=0)
     syn_mags = {}
-    for d in obs_data:
-        fm = f_interp(d['wave']) * best_scale
+    band_residuals = {}
+    ir_excess_bands = []
+    max_ir_excess_dex = np.nan
+    max_ir_excess_sigma = np.nan
+
+    for i, d in enumerate(obs_data):
+        if best_model_fluxes is None:
+            continue
+        fm = best_model_fluxes[i] * best_scale
         if fm > 0:
             # flux → mag (AB): m = -2.5 * log10(f_lambda * wave^2 / c) - 48.6
             info = config.BAND_INFO.get(d['band'], {})
@@ -495,23 +997,779 @@ def fit_sed(photometry, parallax_mas):
             f_hz = fm * d['wave']**2 / c_A
             f_jy = f_hz / 1e-23
             syn_mags[d['band']] = -2.5 * np.log10(f_jy / zero_jy)
+            residual_dex = np.log10(d['flux'] / fm) if d['flux'] > 0 else np.nan
+            residual_sigma = (d['flux'] - fm) / d['err'] if d['err'] > 0 else np.nan
+            band_residuals[d['band']] = {
+                'wave_A': d['wave'],
+                'observed_flux': d['flux'],
+                'model_flux': fm,
+                'residual_dex': float(residual_dex),
+                'residual_sigma': float(residual_sigma),
+                'in_template_grid': bool(best_in_grid[i]) if best_in_grid is not None else False,
+                'red_tail_model': bool(best_red_tail[i]) if best_red_tail is not None else False,
+            }
+            is_ir = d['wave'] >= 25000.0 or d['band'].upper().startswith('WISE')
+            if is_ir and np.isfinite(residual_dex) and np.isfinite(residual_sigma):
+                if not np.isfinite(max_ir_excess_dex):
+                    max_ir_excess_dex = residual_dex
+                    max_ir_excess_sigma = residual_sigma
+                elif residual_dex > max_ir_excess_dex:
+                    max_ir_excess_dex = residual_dex
+                    max_ir_excess_sigma = residual_sigma
+                if residual_dex >= 0.30 and residual_sigma >= 3.0:
+                    ir_excess_bands.append(d['band'])
+
+    tail_wave = np.array([])
+    tail_flux = np.array([])
+    if np.nanmax(obs_waves) > best_tmpl['wavelength'][-1]:
+        tail_wave = np.geomspace(best_tmpl['wavelength'][-1],
+                                 np.nanmax(obs_waves) * 1.05, 120)
+        tail_model, _, tail_red = _model_flux_at_bands(
+            best_tmpl['wavelength'], best_tmpl['flux'], tail_wave)
+        ok = tail_red & np.isfinite(tail_model) & (tail_model > 0)
+        tail_wave = tail_wave[ok]
+        tail_flux = tail_model[ok] * best_scale
 
     return {
         'teff_sed': best_params[0],
         'logg_sed': best_params[1],
         'chi2_sed': best_chi2,
+        'chi2_sed_photospheric': best_chi2,
+        'chi2_sed_all': best_chi2_all,
         'angular_radius_rad': angular_radius,
         'R_Rsun': R_Rsun,
         'scale': best_scale,
         'synthetic_mags': syn_mags,
+        'sed_fit_bands': [obs_data[i]['band'] for i in range(len(obs_data))
+                          if best_fit_mask is not None and best_fit_mask[i]],
+        'sed_red_tail_bands': [obs_data[i]['band'] for i in range(len(obs_data))
+                               if best_red_tail is not None and best_red_tail[i]],
+        'band_residuals': band_residuals,
+        'ir_excess_flag': bool(ir_excess_bands),
+        'ir_excess_bands': ir_excess_bands,
+        'max_ir_excess_dex': float(max_ir_excess_dex)
+        if np.isfinite(max_ir_excess_dex) else np.nan,
+        'max_ir_excess_sigma': float(max_ir_excess_sigma)
+        if np.isfinite(max_ir_excess_sigma) else np.nan,
+        'model_grid': model_source,
+        'spectral_type': spectral_type,
+        'best_model_wave': best_tmpl['wavelength'],
+        'best_model_flux': best_tmpl['flux'] * best_scale,
+        'best_model_tail_wave': tail_wave,
+        'best_model_tail_flux': tail_flux,
     }
+
+
+# ==================================================================
+#  NN 模板 MCMC 拟合
+# ==================================================================
+
+def _nn_template_arrays(specclass='DA'):
+    templates = load_nn_wd_templates(specclass)
+    if not templates:
+        return None
+    keys = sorted(templates)
+    wave = templates[keys[0]]['wavelength']
+    labels = np.array(keys, dtype=float)
+    flux = np.vstack([templates[k]['flux'] for k in keys])
+    return wave, labels, flux, templates[keys[0]].get('model_source', 'NN')
+
+
+def _template_sampler_arrays(specclass='DA', model_grid='auto'):
+    """Return a common-wavelength template array for posterior sampling."""
+    templates, _, _, model_source = _resolve_template_grid(
+        model_grid=model_grid, spectral_type=specclass)
+    if not templates:
+        return None
+    keys = sorted(templates)
+    base_wave = np.asarray(templates[keys[0]]['wavelength'], dtype=float)
+    order = np.argsort(base_wave)
+    base_wave = base_wave[order]
+    labels = []
+    spectra = []
+    for key in keys:
+        wave_i = np.asarray(templates[key]['wavelength'], dtype=float)
+        flux_i = np.asarray(templates[key]['flux'], dtype=float)
+        good = np.isfinite(wave_i) & np.isfinite(flux_i)
+        if np.sum(good) < 100:
+            continue
+        sort_i = np.argsort(wave_i[good])
+        wave_i = wave_i[good][sort_i]
+        flux_i = flux_i[good][sort_i]
+        if len(wave_i) == len(base_wave) and np.allclose(wave_i, base_wave):
+            flux_common = flux_i
+        else:
+            flux_common = np.interp(base_wave, wave_i, flux_i,
+                                    left=np.nan, right=np.nan)
+        if np.sum(np.isfinite(flux_common)) < 100:
+            continue
+        labels.append(key)
+        spectra.append(np.nan_to_num(flux_common, nan=0.0, posinf=0.0,
+                                     neginf=0.0))
+    if not spectra:
+        return None
+    return (base_wave, np.asarray(labels, dtype=float),
+            np.vstack(spectra), model_source)
+
+
+def _weighted_grid_spectrum(labels, flux_grid, teff, logg, k=8):
+    """Fast local inverse-distance interpolation over the NN output grid."""
+    labels = np.asarray(labels, dtype=float)
+    flux_grid = np.asarray(flux_grid, dtype=float)
+    t_span = max(np.nanmax(labels[:, 0]) - np.nanmin(labels[:, 0]), 1.0)
+    g_span = max(np.nanmax(labels[:, 1]) - np.nanmin(labels[:, 1]), 0.1)
+    dt = (labels[:, 0] - teff) / max(t_span / 20.0, 250.0)
+    dg = (labels[:, 1] - logg) / max(g_span / 8.0, 0.125)
+    dist2 = dt * dt + dg * dg
+    i0 = int(np.nanargmin(dist2))
+    if dist2[i0] < 1e-12:
+        return flux_grid[i0]
+    k = min(k, len(labels))
+    idx = np.argpartition(dist2, k - 1)[:k]
+    weights = 1.0 / np.maximum(dist2[idx], 1e-12)
+    weights /= np.sum(weights)
+    return np.sum(flux_grid[idx] * weights[:, None], axis=0)
+
+
+def _vgrav_from_mass_radius(mass_msun, radius_rsun):
+    mass_msun = np.asarray(mass_msun, dtype=float)
+    radius_rsun = np.asarray(radius_rsun, dtype=float)
+    out = np.full(np.broadcast_shapes(mass_msun.shape, radius_rsun.shape),
+                  np.nan, dtype=float)
+    mass_b = np.broadcast_to(mass_msun, out.shape)
+    radius_b = np.broadcast_to(radius_rsun, out.shape)
+    good = np.isfinite(mass_b) & np.isfinite(radius_b) & (mass_b > 0) & (radius_b > 0)
+    out[good] = (
+        G_CGS * mass_b[good] * M_SUN_G
+        / (radius_b[good] * R_SUN_CM)
+        / (C_KMS * 1.0e5)
+        / 1.0e5
+    )
+    return out
+
+
+def fit_wd_mcmc_nn(wave, flux, err=None, specclass='DA', initial=None,
+                   parallax_mas=None, teff_prior=None,
+                   teff_prior_sigma=None, nwalkers=32, nsteps=800,
+                   burn=200, thin=5, random_seed=42,
+                   output_dir=None, max_pixels=900,
+                   model_grid='auto', sampler='auto', n_importance=None,
+                   parallax_err_mas=None,
+                   gaia_teff_prior=None, gaia_teff_prior_sigma=None,
+                   gaia_logg_prior=None, gaia_logg_prior_sigma=None,
+                   gaia_mass_prior=None, gaia_mass_prior_sigma=None,
+                   gaia_radius_prior=None, gaia_radius_prior_sigma=None):
+    """
+    MCMC fit using the local neural-network WD spectral grid.
+
+    Parameters
+    ----------
+    wave, flux, err : array
+        Observed spectrum.  Wavelength must be Angstrom.  SDSS/DESI style flux
+        stored in 1e-17 cgs units is detected for the radius sanity check.
+    specclass : {'DA', 'DB'}
+        Which local NN grid to use.
+    parallax_mas : float, optional
+        If supplied, the sampler adds a weak radius prior using
+        ``R = d sqrt(scale)`` and the logg mass-radius relation.
+
+    Returns
+    -------
+    dict
+        Posterior medians/errors and paths to generated plots/tables.
+    """
+    try:
+        import emcee
+    except Exception:
+        emcee = None
+
+    arrays = _template_sampler_arrays(specclass, model_grid=model_grid)
+    if arrays is None:
+        return {
+            'status': 'skipped',
+            'error': f'{model_grid} {specclass} templates not found',
+            'model_grid': str(model_grid),
+        }
+    model_wave, labels, flux_grid, model_source = arrays
+    t_min, t_max = float(np.min(labels[:, 0])), float(np.max(labels[:, 0]))
+    g_min, g_max = float(np.min(labels[:, 1])), float(np.max(labels[:, 1]))
+
+    w, f, e, _ = _prepare_spectrum(wave, flux, err, w_min=3700, w_max=9200)
+    if w is None:
+        return {'status': 'failed', 'error': 'not enough optical spectrum'}
+    order = np.argsort(w)
+    w, f = w[order], f[order]
+    if e is None:
+        e = np.full_like(f, np.nan)
+    else:
+        e = e[order]
+    if len(w) > max_pixels:
+        idx = np.linspace(0, len(w) - 1, int(max_pixels)).astype(int)
+        w, f, e = w[idx], f[idx], e[idx]
+    med_flux = np.nanmedian(np.abs(f[np.isfinite(f)]))
+    if not np.isfinite(med_flux) or med_flux <= 0:
+        med_flux = 1.0
+    e = np.asarray(e, dtype=float)
+    e_floor = np.maximum(0.03 * np.abs(f), 0.02 * med_flux)
+    e = np.where(np.isfinite(e) & (e > 0), e, e_floor)
+    e = np.maximum(e, e_floor)
+
+    if initial is None:
+        cont = fit_single_wd(
+            wave, flux, err, line_only=False,
+            model_grid=f'nn_{str(specclass).lower()}',
+            spectral_type=specclass)
+        balmer = fit_balmer_line_profiles(
+            wave, flux, err, teff_prior=(cont or {}).get('teff'),
+            model_grid=f'nn_{str(specclass).lower()}',
+            spectral_type=specclass)
+        initial = balmer or cont or {}
+        if cont and 'scale' in cont:
+            initial = dict(initial)
+            initial.setdefault('scale', cont.get('scale'))
+
+    t0 = float(initial.get('teff', np.nanmedian(labels[:, 0])))
+    g0 = float(initial.get('logg', np.nanmedian(labels[:, 1])))
+    rv0 = float(initial.get('rv_kms', 0.0) or 0.0)
+    scale0 = float(initial.get('scale', 0.0) or 0.0)
+    if not np.isfinite(scale0) or scale0 <= 0:
+        guess_surface = _weighted_grid_spectrum(labels, flux_grid, t0, g0)
+        guess_model = np.interp(w, model_wave, guess_surface, left=0, right=0)
+        denom = np.sum((guess_model / e) ** 2)
+        scale0 = np.sum(f * guess_model / e**2) / denom if denom > 0 else 1e-20
+    scale0 = max(scale0, 1e-40)
+
+    t0 = float(np.clip(t0, t_min + 1.0, t_max - 1.0))
+    g0 = float(np.clip(g0, g_min + 0.01, g_max - 0.01))
+    p0_center = np.array([t0, g0, rv0, np.log(scale0)], dtype=float)
+    rng = np.random.default_rng(random_seed)
+    nwalkers = max(int(nwalkers), 2 * len(p0_center) + 2)
+    p0 = np.repeat(p0_center[None, :], nwalkers, axis=0)
+    p0[:, 0] += rng.normal(0.0, 250.0, nwalkers)
+    p0[:, 1] += rng.normal(0.0, 0.06, nwalkers)
+    p0[:, 2] += rng.normal(0.0, 20.0, nwalkers)
+    p0[:, 3] += rng.normal(0.0, 0.15, nwalkers)
+    p0[:, 0] = np.clip(p0[:, 0], t_min + 1.0, t_max - 1.0)
+    p0[:, 1] = np.clip(p0[:, 1], g_min + 0.01, g_max - 0.01)
+
+    flux_unit, flux_unit_label = _infer_observed_flux_unit(f)
+    parallax_val = None
+    try:
+        parallax_val = float(parallax_mas)
+    except (TypeError, ValueError):
+        parallax_val = None
+    parallax_err_val = None
+    try:
+        parallax_err_val = float(parallax_err_mas)
+    except (TypeError, ValueError):
+        parallax_err_val = None
+
+    def _finite_prior(value):
+        try:
+            value = float(value)
+            return value if np.isfinite(value) else None
+        except (TypeError, ValueError):
+            return None
+
+    gaia_teff_prior = _finite_prior(gaia_teff_prior)
+    gaia_logg_prior = _finite_prior(gaia_logg_prior)
+    gaia_mass_prior = _finite_prior(gaia_mass_prior)
+    gaia_radius_prior = _finite_prior(gaia_radius_prior)
+
+    def _best_ln_scale(teff, logg, rv):
+        surface = _weighted_grid_spectrum(labels, flux_grid, teff, logg)
+        rest_wave = w / (1.0 + rv / C_KMS)
+        model = np.interp(rest_wave, model_wave, surface, left=0.0, right=0.0)
+        denom = np.sum((model / e) ** 2)
+        scale = np.sum(f * model / e**2) / denom if denom > 0 else scale0
+        if not np.isfinite(scale) or scale <= 0:
+            scale = scale0
+        return float(np.log(max(scale, 1.0e-60)))
+
+    def _log_prob(theta):
+        teff, logg, rv, ln_scale = theta
+        if not (t_min <= teff <= t_max and g_min <= logg <= g_max
+                and -650.0 <= rv <= 650.0 and -120.0 <= ln_scale <= 60.0):
+            return -np.inf
+        surface = _weighted_grid_spectrum(labels, flux_grid, teff, logg)
+        rest_wave = w / (1.0 + rv / C_KMS)
+        model = np.interp(rest_wave, model_wave, surface, left=0.0, right=0.0)
+        model = model * np.exp(ln_scale)
+        good = np.isfinite(model) & (model > 0)
+        if np.sum(good) < max(50, len(w) // 3):
+            return -np.inf
+        resid = f[good] - model[good]
+        logp = -0.5 * np.sum((resid / e[good]) ** 2 + np.log(2.0 * np.pi * e[good] ** 2))
+        if teff_prior is not None and teff_prior_sigma:
+            sig = max(float(teff_prior_sigma), 100.0)
+            logp += -0.5 * ((teff - float(teff_prior)) / sig) ** 2
+        if gaia_teff_prior is not None:
+            sig = max(float(gaia_teff_prior_sigma or 3000.0), 500.0)
+            logp += -0.5 * ((teff - gaia_teff_prior) / sig) ** 2
+        if gaia_logg_prior is not None:
+            sig = max(float(gaia_logg_prior_sigma or 0.25), 0.08)
+            logp += -0.5 * ((logg - gaia_logg_prior) / sig) ** 2
+        mass_theta = _logg_to_mass(logg)
+        radius_theta = compute_wd_radius(mass_theta, logg)
+        if gaia_mass_prior is not None:
+            sig = max(float(gaia_mass_prior_sigma or 0.12), 0.04)
+            logp += -0.5 * ((mass_theta - gaia_mass_prior) / sig) ** 2
+        if gaia_radius_prior is not None:
+            sig = max(float(gaia_radius_prior_sigma or 0.003), 0.0008)
+            logp += -0.5 * ((radius_theta - gaia_radius_prior) / sig) ** 2
+        if parallax_val is not None and np.isfinite(parallax_val) and parallax_val > 0:
+            r_info = _distance_scale_radius(
+                np.exp(ln_scale), parallax_val,
+                observed_flux_unit=flux_unit)
+            if r_info is not None:
+                try:
+                    mr_radius = radius_theta
+                    par_frac = (
+                        abs(parallax_err_val / parallax_val)
+                        if (parallax_err_val is not None
+                            and np.isfinite(parallax_err_val)
+                            and parallax_err_val > 0) else 0.0
+                    )
+                    sigma_r = np.hypot(max(0.18 * mr_radius, 0.0012),
+                                       par_frac * r_info['radius_rsun'])
+                    logp += -0.5 * ((r_info['radius_rsun'] - mr_radius) / sigma_r) ** 2
+                except Exception:
+                    pass
+        return float(logp)
+
+    use_emcee = emcee is not None and str(sampler).lower() not in {
+        'importance', 'importance_sampling', 'fallback'
+    }
+    sampler_backend = 'emcee' if use_emcee else 'importance_sampling_fallback'
+    mcmc_acceptance_fraction = np.nan
+    mcmc_acceptance_fraction_min = np.nan
+    mcmc_acceptance_fraction_max = np.nan
+    mcmc_autocorr_time_max = np.nan
+    mcmc_converged = False
+    mcmc_warning = ''
+    if use_emcee:
+        np.random.seed(int(random_seed))
+        sampler_obj = emcee.EnsembleSampler(nwalkers, 4, _log_prob)
+        sampler_obj.run_mcmc(p0, int(nsteps), progress=False)
+        try:
+            acc = np.asarray(sampler_obj.acceptance_fraction, dtype=float)
+            acc = acc[np.isfinite(acc)]
+            if acc.size:
+                mcmc_acceptance_fraction = float(np.nanmedian(acc))
+                mcmc_acceptance_fraction_min = float(np.nanmin(acc))
+                mcmc_acceptance_fraction_max = float(np.nanmax(acc))
+                if mcmc_acceptance_fraction < 0.15 or mcmc_acceptance_fraction > 0.70:
+                    mcmc_warning = 'acceptance_fraction_outside_nominal_range'
+        except Exception:
+            pass
+        try:
+            tau = np.asarray(sampler_obj.get_autocorr_time(tol=0), dtype=float)
+            tau = tau[np.isfinite(tau) & (tau > 0)]
+            if tau.size:
+                mcmc_autocorr_time_max = float(np.nanmax(tau))
+                mcmc_converged = bool(int(nsteps) >= 50.0 * mcmc_autocorr_time_max)
+                if not mcmc_converged:
+                    extra = 'chain_shorter_than_50_autocorr_times'
+                    mcmc_warning = f'{mcmc_warning};{extra}' if mcmc_warning else extra
+        except Exception as exc:
+            mcmc_warning = (
+                f'{mcmc_warning};autocorr_unavailable:{exc}'
+                if mcmc_warning else f'autocorr_unavailable:{exc}'
+            )
+        burn = min(max(int(burn), 0), max(int(nsteps) - 1, 0))
+        thin = max(int(thin), 1)
+        flat = sampler_obj.get_chain(discard=burn, thin=thin, flat=True)
+        logp = sampler_obj.get_log_prob(discard=burn, thin=thin, flat=True)
+        if flat.size == 0:
+            flat = sampler_obj.get_chain(flat=True)
+            logp = sampler_obj.get_log_prob(flat=True)
+    else:
+        n_prop = int(n_importance or min(max(int(nwalkers) * int(nsteps) // 2, 2500), 6000))
+        t_center = gaia_teff_prior if gaia_teff_prior is not None else t0
+        g_center = gaia_logg_prior if gaia_logg_prior is not None else g0
+        t_sigma = max(float(gaia_teff_prior_sigma or teff_prior_sigma or 3000.0), 900.0)
+        g_sigma = max(float(gaia_logg_prior_sigma or 0.28), 0.12)
+        candidates = np.empty((n_prop, 4), dtype=float)
+        broad = rng.random(n_prop) < 0.25
+        candidates[:, 0] = rng.normal(t_center, t_sigma, n_prop)
+        candidates[:, 1] = rng.normal(g_center, g_sigma, n_prop)
+        candidates[:, 2] = rng.normal(rv0, 90.0, n_prop)
+        candidates[broad, 0] = rng.uniform(t_min, t_max, int(np.sum(broad)))
+        candidates[broad, 1] = rng.uniform(g_min, g_max, int(np.sum(broad)))
+        candidates[broad, 2] = rng.uniform(-350.0, 350.0, int(np.sum(broad)))
+        candidates[:, 0] = np.clip(candidates[:, 0], t_min + 1.0, t_max - 1.0)
+        candidates[:, 1] = np.clip(candidates[:, 1], g_min + 0.01, g_max - 0.01)
+        for i in range(n_prop):
+            candidates[i, 3] = (
+                _best_ln_scale(candidates[i, 0], candidates[i, 1], candidates[i, 2])
+                + rng.normal(0.0, 0.10)
+            )
+        logp_all = np.array([_log_prob(theta) for theta in candidates], dtype=float)
+        finite = np.isfinite(logp_all)
+        if not np.any(finite):
+            candidates = p0.copy()
+            logp_all = np.array([_log_prob(theta) for theta in candidates], dtype=float)
+            finite = np.isfinite(logp_all)
+        cand_f = candidates[finite]
+        logp_f = logp_all[finite]
+        if len(cand_f) == 0:
+            cand_f = p0.copy()
+            logp_f = np.zeros(len(cand_f), dtype=float)
+        # Low/medium-resolution survey spectra have imperfect flux calibration
+        # and template systematics.  A literal pixel likelihood can collapse the
+        # fallback sampler onto one point, so temper it until the posterior has
+        # a useful effective sample size.  emcee users still get the untempered
+        # likelihood above.
+        span = np.nanpercentile(logp_f, 95) - np.nanpercentile(logp_f, 5)
+        temperature = max(1.0, span / 25.0) if np.isfinite(span) else 1.0
+        target_ess = min(max(120.0, 0.05 * len(logp_f)), 700.0)
+        for _ in range(8):
+            weights = np.exp((logp_f - np.nanmax(logp_f)) / temperature)
+            sw = np.sum(weights)
+            if not np.isfinite(sw) or sw <= 0:
+                weights = np.ones_like(logp_f, dtype=float)
+                sw = np.sum(weights)
+            weights = weights / sw
+            ess = 1.0 / np.sum(weights**2)
+            if ess >= target_ess:
+                break
+            temperature *= 1.8
+        sampler_temperature = float(temperature)
+        sampler_effective_n = float(1.0 / np.sum(weights**2))
+        n_post = min(max(1000, len(cand_f)), 10000)
+        idx = rng.choice(len(cand_f), size=n_post, replace=True, p=weights)
+        flat = cand_f[idx]
+        logp = logp_f[idx]
+    q16, q50, q84 = np.percentile(flat, [16, 50, 84], axis=0)
+    best_idx = int(np.nanargmax(logp)) if len(logp) else 0
+    best = flat[best_idx]
+    med = q50
+    med_surface = _weighted_grid_spectrum(labels, flux_grid, med[0], med[1])
+    med_model_wave = model_wave * (1.0 + med[2] / C_KMS)
+    med_model_flux = med_surface * np.exp(med[3])
+
+    def _finite_percentiles(values):
+        values = np.asarray(values, dtype=float)
+        values = values[np.isfinite(values)]
+        if values.size == 0:
+            return np.array([np.nan, np.nan, np.nan], dtype=float)
+        return np.percentile(values, [16, 50, 84])
+
+    scale = float(np.exp(med[3]))
+    r_info = _distance_scale_radius(scale, parallax_val, flux_unit)
+    scale_samples = np.exp(flat[:, 3])
+    mass_samples = np.array([_logg_to_mass(float(g)) for g in flat[:, 1]], dtype=float)
+    radius_samples = compute_wd_radius(mass_samples, flat[:, 1])
+    mass_q = _finite_percentiles(mass_samples)
+    radius_q = _finite_percentiles(radius_samples)
+    vgrav_mr_q = _finite_percentiles(
+        _vgrav_from_mass_radius(mass_samples, radius_samples))
+    mass = float(mass_q[1]) if np.isfinite(mass_q[1]) else _logg_to_mass(float(med[1]))
+    radius_mr = (
+        float(radius_q[1]) if np.isfinite(radius_q[1])
+        else compute_wd_radius(mass, float(med[1]))
+    )
+    cool_samples = _cooling_from_teff_mass_samples(flat[:, 0], mass_samples)
+    cool_q = _finite_percentiles(cool_samples.get('cooling_age_gyr'))
+    total_q = _finite_percentiles(cool_samples.get('total_age_gyr'))
+    result = {
+        'status': 'ok',
+        'model_grid': model_source,
+        'spectral_type': specclass,
+        'teff': float(med[0]),
+        'teff_err_minus': float(med[0] - q16[0]),
+        'teff_err_plus': float(q84[0] - med[0]),
+        'teff_err': float(0.5 * ((med[0] - q16[0]) + (q84[0] - med[0]))),
+        'logg': float(med[1]),
+        'logg_err_minus': float(med[1] - q16[1]),
+        'logg_err_plus': float(q84[1] - med[1]),
+        'logg_err': float(0.5 * ((med[1] - q16[1]) + (q84[1] - med[1]))),
+        'rv_kms': float(med[2]),
+        'rv_err_minus': float(med[2] - q16[2]),
+        'rv_err_plus': float(q84[2] - med[2]),
+        'rv_err': float(0.5 * ((med[2] - q16[2]) + (q84[2] - med[2]))),
+        'scale': scale,
+        'scale_err_minus': float(scale - np.exp(q16[3])),
+        'scale_err_plus': float(np.exp(q84[3]) - scale),
+        'scale_err': float(0.5 * ((scale - np.exp(q16[3])) + (np.exp(q84[3]) - scale))),
+        'best_teff': float(best[0]),
+        'best_logg': float(best[1]),
+        'best_rv_kms': float(best[2]),
+        'best_scale': float(np.exp(best[3])),
+        'mass_msun_mr': float(mass),
+        'mass_msun_mr_err_minus': float(mass_q[1] - mass_q[0]),
+        'mass_msun_mr_err_plus': float(mass_q[2] - mass_q[1]),
+        'mass_msun_mr_err': float(0.5 * ((mass_q[1] - mass_q[0]) + (mass_q[2] - mass_q[1]))),
+        'radius_rsun_mr': float(radius_mr),
+        'radius_rsun_mr_err_minus': float(radius_q[1] - radius_q[0]),
+        'radius_rsun_mr_err_plus': float(radius_q[2] - radius_q[1]),
+        'radius_rsun_mr_err': float(0.5 * ((radius_q[1] - radius_q[0]) + (radius_q[2] - radius_q[1]))),
+        'v_grav_mr_kms': float(vgrav_mr_q[1]),
+        'v_grav_mr_err_minus': float(vgrav_mr_q[1] - vgrav_mr_q[0]),
+        'v_grav_mr_err_plus': float(vgrav_mr_q[2] - vgrav_mr_q[1]),
+        'v_grav_mr_err': float(0.5 * ((vgrav_mr_q[1] - vgrav_mr_q[0]) + (vgrav_mr_q[2] - vgrav_mr_q[1]))),
+        'mass_msun_preferred': float(mass),
+        'mass_msun_preferred_err': float(0.5 * ((mass_q[1] - mass_q[0]) + (mass_q[2] - mass_q[1]))),
+        'radius_rsun_preferred': float(radius_mr),
+        'radius_rsun_preferred_err': float(0.5 * ((radius_q[1] - radius_q[0]) + (radius_q[2] - radius_q[1]))),
+        'v_grav_preferred_kms': float(vgrav_mr_q[1]),
+        'v_grav_preferred_err': float(0.5 * ((vgrav_mr_q[1] - vgrav_mr_q[0]) + (vgrav_mr_q[2] - vgrav_mr_q[1]))),
+        'preferred_physical_source': 'mcmc_logg_mass_radius_relation',
+        'observed_flux_unit': flux_unit,
+        'observed_flux_unit_label': flux_unit_label,
+        'sampler_backend': sampler_backend,
+        'sampler_temperature': locals().get('sampler_temperature', 1.0),
+        'sampler_effective_n': locals().get('sampler_effective_n', float(len(flat))),
+        'mcmc_acceptance_fraction': mcmc_acceptance_fraction,
+        'mcmc_acceptance_fraction_min': mcmc_acceptance_fraction_min,
+        'mcmc_acceptance_fraction_max': mcmc_acceptance_fraction_max,
+        'mcmc_autocorr_time_max': mcmc_autocorr_time_max,
+        'mcmc_converged': bool(mcmc_converged),
+        'mcmc_warning': mcmc_warning,
+        'nwalkers': int(nwalkers),
+        'nsteps': int(nsteps),
+        'burn': int(burn),
+        'thin': int(thin),
+        'n_posterior_samples': int(len(flat)),
+        'best_model_wave': med_model_wave,
+        'best_model_flux': med_model_flux,
+    }
+    if r_info is not None:
+        dist_cm = r_info['distance_pc'] * 3.085677581491367e18
+        scale_radius_samples = (
+            dist_cm * np.sqrt(np.maximum(scale_samples * flux_unit, 0.0))
+            / R_SUN_CM)
+        scale_radius_q = _finite_percentiles(scale_radius_samples)
+        scale_mass_samples = (
+            (10.0 ** flat[:, 1])
+            * (scale_radius_samples * R_SUN_CM) ** 2
+            / G_CGS / M_SUN_G)
+        scale_mass_q = _finite_percentiles(scale_mass_samples)
+        vgrav_scale_q = _finite_percentiles(
+            _vgrav_from_mass_radius(scale_mass_samples, scale_radius_samples))
+        result.update({
+            'distance_pc': r_info['distance_pc'],
+            'scale_physical_factor': r_info['physical_scale'],
+            'scale_radius_rsun': r_info['radius_rsun'],
+            'scale_radius_rsun_err_minus': float(scale_radius_q[1] - scale_radius_q[0]),
+            'scale_radius_rsun_err_plus': float(scale_radius_q[2] - scale_radius_q[1]),
+            'scale_radius_rsun_err': float(0.5 * ((scale_radius_q[1] - scale_radius_q[0])
+                                                 + (scale_radius_q[2] - scale_radius_q[1]))),
+            'scale_radius_ratio_to_mr': r_info['radius_rsun'] / radius_mr,
+        })
+        result['mass_msun_from_scale_logg'] = float(scale_mass_q[1])
+        result['mass_msun_from_scale_logg_err_minus'] = float(scale_mass_q[1] - scale_mass_q[0])
+        result['mass_msun_from_scale_logg_err_plus'] = float(scale_mass_q[2] - scale_mass_q[1])
+        result['mass_msun_from_scale_logg_err'] = float(0.5 * ((scale_mass_q[1] - scale_mass_q[0])
+                                                              + (scale_mass_q[2] - scale_mass_q[1])))
+        result['v_grav_scale_logg_kms'] = float(vgrav_scale_q[1])
+        result['v_grav_scale_logg_err_minus'] = float(vgrav_scale_q[1] - vgrav_scale_q[0])
+        result['v_grav_scale_logg_err_plus'] = float(vgrav_scale_q[2] - vgrav_scale_q[1])
+        result['v_grav_scale_logg_err'] = float(0.5 * ((vgrav_scale_q[1] - vgrav_scale_q[0])
+                                                       + (vgrav_scale_q[2] - vgrav_scale_q[1])))
+        if (np.isfinite(scale_radius_q[1]) and 0.003 <= scale_radius_q[1] <= 0.05
+                and np.isfinite(scale_mass_q[1]) and scale_mass_q[1] > 0):
+            result['mass_msun_preferred'] = float(scale_mass_q[1])
+            result['mass_msun_preferred_err'] = result['mass_msun_from_scale_logg_err']
+            result['radius_rsun_preferred'] = float(scale_radius_q[1])
+            result['radius_rsun_preferred_err'] = result['scale_radius_rsun_err']
+            result['v_grav_preferred_kms'] = float(vgrav_scale_q[1])
+            result['v_grav_preferred_err'] = result['v_grav_scale_logg_err']
+            result['preferred_physical_source'] = 'mcmc_gaia_parallax_scale_logg'
+
+    if np.isfinite(cool_q[1]):
+        result['cooling_age_gyr'] = float(cool_q[1])
+        result['cooling_age_gyr_err_minus'] = float(cool_q[1] - cool_q[0])
+        result['cooling_age_gyr_err_plus'] = float(cool_q[2] - cool_q[1])
+        result['cooling_age_gyr_err'] = float(0.5 * ((cool_q[1] - cool_q[0]) + (cool_q[2] - cool_q[1])))
+        result['total_age_gyr'] = float(total_q[1])
+        result['total_age_gyr_err_minus'] = float(total_q[1] - total_q[0])
+        result['total_age_gyr_err_plus'] = float(total_q[2] - total_q[1])
+        result['total_age_gyr_err'] = float(0.5 * ((total_q[1] - total_q[0]) + (total_q[2] - total_q[1])))
+        result['age_source'] = 'NN_MCMC_Teff_logg+MR_mass+WD_cooling_tracks'
+    else:
+        cool_fallback = (
+            8.8e6 * (mass_samples / 0.6)**(5.0/7.0)
+            * (flat[:, 0] / 12000)**(-2.5) / 1e9)
+        cool_q = _finite_percentiles(cool_fallback)
+        result['cooling_age_gyr'] = float(cool_q[1])
+        result['cooling_age_gyr_err_minus'] = float(cool_q[1] - cool_q[0])
+        result['cooling_age_gyr_err_plus'] = float(cool_q[2] - cool_q[1])
+        result['cooling_age_gyr_err'] = float(0.5 * ((cool_q[1] - cool_q[0]) + (cool_q[2] - cool_q[1])))
+        result['total_age_gyr'] = np.nan
+        result['age_source'] = 'NN_MCMC_Teff_logg+MR_mass+rough_Mestel_age'
+    try:
+        from .cooling_age import compute_progenitor_lifetime
+        if len(mass_samples) > 1500:
+            prog_idx = np.linspace(0, len(mass_samples) - 1, 1500).astype(int)
+        else:
+            prog_idx = np.arange(len(mass_samples))
+        progenitor = []
+        ms_life = []
+        cool_for_ms = []
+        for sample_i, m in zip(prog_idx, mass_samples[prog_idx]):
+            prog = compute_progenitor_lifetime(float(m))
+            if prog is not None:
+                progenitor.append(prog.get('m_progenitor', np.nan))
+                ms_life.append(prog.get('ms_lifetime_gyr', np.nan))
+                cool_for_ms.append(np.asarray(cool_samples.get('cooling_age_gyr'), dtype=float)[sample_i])
+        prog_q = _finite_percentiles(progenitor)
+        ms_q = _finite_percentiles(ms_life)
+        if np.isfinite(prog_q[1]):
+            result['m_progenitor_msun'] = float(prog_q[1])
+            result['m_progenitor_msun_err_minus'] = float(prog_q[1] - prog_q[0])
+            result['m_progenitor_msun_err_plus'] = float(prog_q[2] - prog_q[1])
+            result['m_progenitor_msun_err'] = float(0.5 * ((prog_q[1] - prog_q[0])
+                                                          + (prog_q[2] - prog_q[1])))
+        if np.isfinite(ms_q[1]):
+            result['ms_lifetime_gyr'] = float(ms_q[1])
+            result['ms_lifetime_gyr_err_minus'] = float(ms_q[1] - ms_q[0])
+            result['ms_lifetime_gyr_err_plus'] = float(ms_q[2] - ms_q[1])
+            result['ms_lifetime_gyr_err'] = float(0.5 * ((ms_q[1] - ms_q[0])
+                                                        + (ms_q[2] - ms_q[1])))
+            if np.isfinite(result.get('cooling_age_gyr', np.nan)):
+                total_ms = np.asarray(cool_for_ms, dtype=float) + np.asarray(ms_life, dtype=float)
+                total_ms_q = _finite_percentiles(total_ms)
+                result['total_age_with_ms_gyr'] = float(total_ms_q[1])
+                result['total_age_with_ms_gyr_err_minus'] = float(total_ms_q[1] - total_ms_q[0])
+                result['total_age_with_ms_gyr_err_plus'] = float(total_ms_q[2] - total_ms_q[1])
+                result['total_age_with_ms_gyr_err'] = float(0.5 * ((total_ms_q[1] - total_ms_q[0])
+                                                                  + (total_ms_q[2] - total_ms_q[1])))
+    except Exception:
+        pass
+
+    if output_dir:
+        os.makedirs(output_dir, exist_ok=True)
+        import pandas as pd
+        summary_path = os.path.join(output_dir, 'wd_nn_mcmc_summary.csv')
+        summary = {k: v for k, v in result.items()
+                   if not isinstance(v, np.ndarray)}
+        pd.DataFrame([summary]).to_csv(summary_path, index=False)
+        result['summary_path'] = summary_path
+
+        sample_path = os.path.join(output_dir, 'wd_nn_mcmc_samples.csv')
+        sample_df = pd.DataFrame(
+            flat, columns=['teff', 'logg', 'rv_kms', 'ln_scale'])
+        sample_df['scale'] = np.exp(sample_df['ln_scale'])
+        if len(sample_df) > 10000:
+            sample_df = sample_df.sample(10000, random_state=random_seed)
+        sample_df.to_csv(sample_path, index=False)
+        result['samples_path'] = sample_path
+
+        model_band = None
+        try:
+            n_band = min(160, len(flat))
+            band_idx = rng.choice(len(flat), size=n_band, replace=False)
+            model_samples = []
+            for theta in flat[band_idx]:
+                surface = _weighted_grid_spectrum(
+                    labels, flux_grid, theta[0], theta[1])
+                rest_wave = w / (1.0 + theta[2] / C_KMS)
+                sample_model = np.interp(
+                    rest_wave, model_wave, surface, left=np.nan, right=np.nan)
+                sample_model = sample_model * np.exp(theta[3])
+                model_samples.append(sample_model)
+            model_samples = np.asarray(model_samples, dtype=float)
+            model_band = np.nanpercentile(model_samples, [16, 50, 84], axis=0)
+        except Exception:
+            model_band = None
+
+        model_csv_path = os.path.join(output_dir, 'wd_nn_mcmc_model_band.csv')
+        if model_band is not None:
+            pd.DataFrame({
+                'wavelength_A': w,
+                'flux_obs': f,
+                'flux_err': e,
+                'model_p16': model_band[0],
+                'model_p50': model_band[1],
+                'model_p84': model_band[2],
+                'residual': f - model_band[1],
+            }).to_csv(model_csv_path, index=False)
+        else:
+            interp_med = np.interp(w, med_model_wave, med_model_flux,
+                                   left=np.nan, right=np.nan)
+            pd.DataFrame({
+                'wavelength_A': w,
+                'flux_obs': f,
+                'flux_err': e,
+                'model_p50': interp_med,
+                'residual': f - interp_med,
+            }).to_csv(model_csv_path, index=False)
+        result['model_band_path'] = model_csv_path
+
+        fig, axes = plt.subplots(2, 1, figsize=(14, 8),
+                                 gridspec_kw={'height_ratios': [3, 1]},
+                                 sharex=True)
+        axes[0].fill_between(
+            w, f - e, f + e, color='0.70', alpha=0.28, lw=0,
+            label='Observed 1 sigma')
+        axes[0].plot(w, f, color='black', lw=0.55, alpha=0.72,
+                     label='Observed')
+        if model_band is not None:
+            axes[0].fill_between(
+                w, model_band[0], model_band[2],
+                color='lightcoral', alpha=0.30, lw=0,
+                label='Model 68% posterior')
+            axes[0].plot(
+                w, model_band[1], color='crimson', lw=1.1, alpha=0.95,
+                label=f"NN MCMC: Teff={med[0]:.0f} K, logg={med[1]:.2f}")
+        else:
+            axes[0].plot(med_model_wave, med_model_flux, color='crimson',
+                         lw=1.0, alpha=0.9,
+                         label=f"NN MCMC: Teff={med[0]:.0f} K, logg={med[1]:.2f}")
+        for name, lam in BALMER_PROFILE_LINES.items():
+            axes[0].axvline(lam, color='steelblue', ls=':', lw=0.7, alpha=0.35)
+            axes[0].text(lam, 0.97, name, transform=axes[0].get_xaxis_transform(),
+                         rotation=90, va='top', ha='right', fontsize=7,
+                         color='steelblue', alpha=0.7)
+        axes[0].set_ylabel('Flux')
+        axes[0].legend(fontsize=9)
+        axes[0].grid(True, alpha=0.25)
+        utils.set_spectrum_axes(axes[0], wave, flux, model=med_model_flux)
+        if model_band is not None:
+            interp_model = model_band[1]
+        else:
+            interp_model = np.interp(w, med_model_wave, med_model_flux,
+                                     left=np.nan, right=np.nan)
+        axes[1].fill_between(
+            w, -e, e, color='0.70', alpha=0.28, lw=0,
+            label='Observed 1 sigma')
+        if model_band is not None:
+            axes[1].fill_between(
+                w, f - model_band[2], f - model_band[0],
+                color='lightcoral', alpha=0.25, lw=0,
+                label='Model 68% posterior')
+        axes[1].plot(w, f - interp_model, color='black', lw=0.5, alpha=0.65)
+        axes[1].axhline(0, color='crimson', ls='--', lw=0.8)
+        axes[1].set_xlabel('Wavelength (A)')
+        axes[1].set_ylabel('Residual')
+        axes[1].legend(fontsize=8, loc='best')
+        axes[1].grid(True, alpha=0.25)
+        fig.tight_layout()
+        fit_path = os.path.join(output_dir, 'wd_nn_mcmc_fit.png')
+        utils.save_and_close(fig, fit_path)
+        result['fit_plot_path'] = fit_path
+
+        try:
+            import corner
+            corner_fig = corner.corner(
+                flat, labels=['Teff', 'logg', 'RV', 'ln scale'],
+                truths=med, show_titles=True)
+            corner_path = os.path.join(output_dir, 'wd_nn_mcmc_corner.png')
+            utils.save_and_close(corner_fig, corner_path)
+            result['corner_plot_path'] = corner_path
+        except Exception as exc:
+            result['corner_error'] = str(exc)
+
+    return result
 
 
 # ==================================================================
 #  DWD 组合拟合
 # ==================================================================
 
-def fit_dwd(wave, flux, err=None, single_result=None):
+def fit_dwd(wave, flux, err=None, single_result=None,
+            model_grid='auto', spectral_type='DA'):
     """
     双白矮星 (DWD) 组合光谱拟合.
 
@@ -532,7 +1790,8 @@ def fit_dwd(wave, flux, err=None, single_result=None):
         f_statistic, p_value,
     }
     """
-    templates = _load_koester2()
+    templates, _, _, model_source = _resolve_template_grid(
+        model_grid, spectral_type)
     if not templates:
         return None
 
@@ -639,6 +1898,7 @@ def fit_dwd(wave, flux, err=None, single_result=None):
         'chi2_single': chi2_single,
         'f_statistic': f_stat,
         'p_value': p_val,
+        'model_grid': model_source,
     })
 
     return best_result
@@ -694,45 +1954,150 @@ def derive_physical_params(teff, logg, parallax_mas=None,
         'source': 'none',
     }
 
-    # 方法 A: 用 WD_models 从 (BP-RP, M_G) 插值
+    # 方法 A: 光谱 log g + WD mass-radius relation。This preserves the
+    # atmospheric fit as the primary Teff/logg measurement; Gaia/SED checks are
+    # attached below instead of silently replacing the spectroscopic solution.
+    mass_est = _logg_to_mass(logg)
+    R_est = compute_wd_radius(mass_est, logg)
+    result['mass'] = mass_est
+    result['radius_rsun'] = R_est
+    result['source'] = 'spectroscopic_logg_MR_relation'
+    try:
+        cool = _cooling_from_teff_mass(teff, mass_est)
+        if cool is not None:
+            result['cooling_age_gyr'] = cool.get('cooling_age_gyr', np.nan)
+            result['total_age_gyr'] = cool.get('total_age_gyr', np.nan)
+            result['source'] = 'spectroscopic_logg_MR_relation+WD_models'
+        else:
+            raise ValueError('outside cooling grid')
+    except Exception:
+        # Last-resort rough scaling.  Reports keep the source string so this is
+        # not confused with a proper WD cooling-track age.
+        t_cool_yr = 8.8e6 * (mass_est / 0.6)**(5.0/7.0) * (teff / 12000)**(-2.5)
+        result['cooling_age_gyr'] = t_cool_yr / 1e9
+        result['source'] = 'spectroscopic_logg_MR_relation+rough_Mestel_age'
+
+    if parallax_mas is not None and parallax_mas > 0:
+        result['distance_pc'] = 1000.0 / parallax_mas
+    try:
+        from .cooling_age import compute_progenitor_lifetime
+        prog = compute_progenitor_lifetime(mass_est)
+        if prog is not None:
+            result['m_progenitor'] = prog['m_progenitor']
+            result['ms_lifetime_gyr'] = prog['ms_lifetime_gyr']
+    except Exception:
+        pass
+
+    # 方法 B: 用 WD_models 从 (BP-RP, M_G) 插值，作为距离/测光一致性检查。
     if bp_rp is not None and M_G is not None:
         try:
             from .cooling_age import interpolate_wd_params, compute_progenitor_lifetime
             wd = interpolate_wd_params(bp_rp, M_G)
             if wd is not None:
-                result['mass'] = wd['mass']
-                result['radius_rsun'] = compute_wd_radius(wd['mass'], wd['logg'])
-                result['cooling_age_gyr'] = wd['cooling_age_gyr']
-                result['total_age_gyr'] = wd['total_age_gyr']
-                result['teff'] = wd['teff']
-                result['logg'] = wd['logg']
-                result['source'] = 'WD_models_HR'
+                result['gaia_hr_mass'] = wd['mass']
+                result['gaia_hr_radius_rsun'] = compute_wd_radius(wd['mass'], wd['logg'])
+                result['gaia_hr_cooling_age_gyr'] = wd['cooling_age_gyr']
+                result['gaia_hr_total_age_gyr'] = wd['total_age_gyr']
+                result['gaia_hr_teff'] = wd['teff']
+                result['gaia_hr_logg'] = wd['logg']
+                result['gaia_hr_source'] = 'WD_models_HR'
+                result['delta_teff_gaia_minus_spec'] = wd['teff'] - teff
+                result['delta_logg_gaia_minus_spec'] = wd['logg'] - logg
 
                 prog = compute_progenitor_lifetime(wd['mass'])
                 if prog is not None:
-                    result['m_progenitor'] = prog['m_progenitor']
-                    result['ms_lifetime_gyr'] = prog['ms_lifetime_gyr']
-
-                return result
+                    result['gaia_hr_m_progenitor'] = prog['m_progenitor']
+                    result['gaia_hr_ms_lifetime_gyr'] = prog['ms_lifetime_gyr']
         except Exception:
             pass
 
-    # 方法 B: 用 logg + 经验 mass-radius relation 估计
-    # WD 典型: M ~ 0.6 Msun for logg=8.0; 使用 Hamada-Salpeter 零温 MR
-    # 简化: logg = log10(G*M/R^2), 结合 M-R: R ~ 0.013 * (M/0.6)^{-1/3} Rsun
-    # 用 Nauenberg (1972) 的解析 MR relation
-    mass_est = _logg_to_mass(logg)
-    R_est = compute_wd_radius(mass_est, logg)
-    result['mass'] = mass_est
-    result['radius_rsun'] = R_est
-    result['source'] = 'logg_MR_relation'
-
-    # 估算冷却年龄 (Mestel law 简化)
-    # t_cool ~ 8.8e6 * (M/0.6)^{5/7} * (Teff/12000)^{-5/2} yr
-    t_cool_yr = 8.8e6 * (mass_est / 0.6)**(5.0/7.0) * (teff / 12000)**(-2.5)
-    result['cooling_age_gyr'] = t_cool_yr / 1e9
-
     return result
+
+
+def _cooling_from_teff_mass(teff, mass_msun):
+    """Interpolate WD cooling tracks in (mass, logTeff)."""
+    if teff is None or mass_msun is None or teff <= 0 or mass_msun <= 0:
+        return None
+    try:
+        from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
+        from .cooling_age import _load_wd_model
+        model = _load_wd_model()
+        mass = np.asarray(model['mass_array'], dtype=float)
+        logteff = np.asarray(model['logteff'], dtype=float)
+        age_cool = np.asarray(model['age_cool'], dtype=float)
+        age_total = np.asarray(model['age'], dtype=float)
+        good = (np.isfinite(mass) & np.isfinite(logteff)
+                & np.isfinite(age_cool) & np.isfinite(age_total))
+        pts = np.column_stack([mass[good], logteff[good]])
+        target = np.array([[float(mass_msun), np.log10(float(teff))]])
+        cool_interp = LinearNDInterpolator(pts, age_cool[good])
+        total_interp = LinearNDInterpolator(pts, age_total[good])
+        cool = float(cool_interp(target)[0])
+        total = float(total_interp(target)[0])
+        if not np.isfinite(cool):
+            cool = float(NearestNDInterpolator(pts, age_cool[good])(target)[0])
+        if not np.isfinite(total):
+            total = float(NearestNDInterpolator(pts, age_total[good])(target)[0])
+        return {
+            'cooling_age_gyr': cool,
+            'total_age_gyr': total,
+        }
+    except Exception:
+        return None
+
+
+def _cooling_from_teff_mass_samples(teff, mass_msun):
+    """Vectorized cooling-track interpolation for MCMC posterior samples."""
+    teff = np.asarray(teff, dtype=float)
+    mass_msun = np.asarray(mass_msun, dtype=float)
+    out_shape = np.broadcast(teff, mass_msun).shape
+    teff = np.broadcast_to(teff, out_shape).ravel()
+    mass_msun = np.broadcast_to(mass_msun, out_shape).ravel()
+    cool_out = np.full_like(teff, np.nan, dtype=float)
+    total_out = np.full_like(teff, np.nan, dtype=float)
+    valid_target = np.isfinite(teff) & np.isfinite(mass_msun) & (teff > 0) & (mass_msun > 0)
+    if not np.any(valid_target):
+        return {
+            'cooling_age_gyr': cool_out.reshape(out_shape),
+            'total_age_gyr': total_out.reshape(out_shape),
+        }
+    try:
+        from scipy.interpolate import LinearNDInterpolator, NearestNDInterpolator
+        from .cooling_age import _load_wd_model
+        model = _load_wd_model()
+        mass = np.asarray(model['mass_array'], dtype=float)
+        logteff = np.asarray(model['logteff'], dtype=float)
+        age_cool = np.asarray(model['age_cool'], dtype=float)
+        age_total = np.asarray(model['age'], dtype=float)
+        good = (np.isfinite(mass) & np.isfinite(logteff)
+                & np.isfinite(age_cool) & np.isfinite(age_total))
+        pts = np.column_stack([mass[good], logteff[good]])
+        target = np.column_stack([
+            mass_msun[valid_target],
+            np.log10(teff[valid_target]),
+        ])
+        cool_interp = LinearNDInterpolator(pts, age_cool[good])
+        total_interp = LinearNDInterpolator(pts, age_total[good])
+        cool = np.asarray(cool_interp(target), dtype=float)
+        total = np.asarray(total_interp(target), dtype=float)
+        miss = ~np.isfinite(cool)
+        if np.any(miss):
+            cool[miss] = np.asarray(
+                NearestNDInterpolator(pts, age_cool[good])(target[miss]),
+                dtype=float)
+        miss = ~np.isfinite(total)
+        if np.any(miss):
+            total[miss] = np.asarray(
+                NearestNDInterpolator(pts, age_total[good])(target[miss]),
+                dtype=float)
+        cool_out[valid_target] = cool
+        total_out[valid_target] = total
+    except Exception:
+        pass
+    return {
+        'cooling_age_gyr': cool_out.reshape(out_shape),
+        'total_age_gyr': total_out.reshape(out_shape),
+    }
 
 
 def _logg_to_mass(logg):
@@ -788,13 +2153,16 @@ class WDFitter:
         fitter.plot_all(output_dir)        # → 诊断图
     """
 
-    def __init__(self, wave, flux, err=None):
+    def __init__(self, wave, flux, err=None, model_grid='auto'):
         self.wave = np.asarray(wave, dtype=np.float64)
         self.flux = np.asarray(flux, dtype=np.float64)
         self.err = np.asarray(err, dtype=np.float64) if err is not None else None
+        self.model_grid = model_grid
 
         self.classification = None
         self.single_fit = None
+        self.continuum_fit = None
+        self.balmer_fit = None
         self.dwd_fit = None
         self.physical_params = None
         self.sed_fit = None
@@ -804,34 +2172,107 @@ class WDFitter:
         self.classification = classify_wd_type(self.wave, self.flux, self.err)
         return self.classification
 
-    def fit_single(self, line_only=False):
-        """单星 Koester2 网格拟合"""
-        self.single_fit = fit_single_wd(self.wave, self.flux, self.err,
-                                        line_only=line_only)
+    def _fit_spectral_type(self):
+        if self.classification and self.classification.get('spectral_type'):
+            st = str(self.classification.get('spectral_type')).upper()
+            if st.startswith('DB'):
+                return 'DB'
+        return 'DA'
+
+    def fit_single(self, line_only=False, teff_prior=None,
+                   teff_prior_sigma=3000.0, model_grid=None):
+        """单星 WD 网格拟合，默认优先使用本地 NN DA/DB 模板。"""
+        result = fit_single_wd(self.wave, self.flux, self.err,
+                               line_only=line_only,
+                               teff_prior=teff_prior,
+                               teff_prior_sigma=teff_prior_sigma,
+                               model_grid=model_grid or self.model_grid,
+                               spectral_type=self._fit_spectral_type())
+        if line_only:
+            self.balmer_fit = result
+        else:
+            self.continuum_fit = result
+        self.single_fit = self.balmer_fit or self.continuum_fit
         return self.single_fit
 
-    def fit_double(self):
+    def fit_balmer(self, teff_prior=None, teff_prior_sigma=3000.0,
+                   model_grid=None):
+        """H-beta through H8 normalized Balmer-line profile fit."""
+        self.balmer_fit = fit_balmer_line_profiles(
+            self.wave, self.flux, self.err,
+            teff_prior=teff_prior,
+            teff_prior_sigma=teff_prior_sigma,
+            model_grid=model_grid or self.model_grid,
+            spectral_type=self._fit_spectral_type())
+        self.single_fit = self.balmer_fit or self.continuum_fit
+        return self.balmer_fit
+
+    def fit_double(self, model_grid=None):
         """DWD 组合拟合"""
-        if self.single_fit is None:
-            self.fit_single()
+        if self.continuum_fit is None:
+            self.fit_single(line_only=False)
         self.dwd_fit = fit_dwd(self.wave, self.flux, self.err,
-                               single_result=self.single_fit)
+                               single_result=self.continuum_fit,
+                               model_grid=model_grid or self.model_grid,
+                               spectral_type=self._fit_spectral_type())
         return self.dwd_fit
 
-    def fit_sed(self, photometry, parallax_mas):
+    def fit_sed(self, photometry, parallax_mas, model_grid=None):
         """宽波段 SED 拟合"""
-        self.sed_fit = fit_sed(photometry, parallax_mas)
+        self.sed_fit = fit_sed(
+            photometry, parallax_mas,
+            model_grid=model_grid or self.model_grid,
+            spectral_type=self._fit_spectral_type())
         return self.sed_fit
 
     def derive_params(self, parallax_mas=None, bp_rp=None, M_G=None):
         """推导物理参数"""
         if self.single_fit is None:
-            self.fit_single()
+            if self.continuum_fit is None:
+                self.fit_single(line_only=False)
+            prior = self.continuum_fit.get('teff') if self.continuum_fit else None
+            self.fit_balmer(teff_prior=prior)
+        preferred = self.balmer_fit or self.single_fit
+        if preferred is None:
+            self.fit_single(line_only=False)
+            preferred = self.single_fit
         if self.single_fit is None:
             return None
         self.physical_params = derive_physical_params(
-            self.single_fit['teff'], self.single_fit['logg'],
+            preferred['teff'], preferred['logg'],
             parallax_mas=parallax_mas, bp_rp=bp_rp, M_G=M_G)
+        if self.physical_params:
+            for key in ('teff_err', 'logg_err'):
+                if preferred.get(key) is not None:
+                    self.physical_params[key] = preferred.get(key)
+            logg = self.physical_params.get('logg')
+            logg_err = self.physical_params.get('logg_err')
+            try:
+                logg = float(logg)
+                logg_err = float(logg_err)
+            except Exception:
+                logg = logg_err = np.nan
+            if np.isfinite(logg) and np.isfinite(logg_err) and logg_err > 0:
+                lo = max(logg - logg_err, 6.0)
+                hi = min(logg + logg_err, 10.0)
+                m_lo = _logg_to_mass(lo)
+                m_hi = _logg_to_mass(hi)
+                r_lo = compute_wd_radius(m_lo, lo)
+                r_hi = compute_wd_radius(m_hi, hi)
+                self.physical_params['mass_err'] = float(abs(m_hi - m_lo) / 2.0)
+                self.physical_params['radius_rsun_err'] = float(abs(r_hi - r_lo) / 2.0)
+        expected_radius = None
+        if self.physical_params:
+            expected_radius = self.physical_params.get('radius_rsun')
+        attach_distance_scale_check(
+            self.continuum_fit, parallax_mas, self.flux,
+            expected_radius_rsun=expected_radius)
+        attach_distance_scale_check(
+            self.balmer_fit, parallax_mas, self.flux,
+            expected_radius_rsun=expected_radius)
+        attach_distance_scale_check(
+            self.single_fit, parallax_mas, self.flux,
+            expected_radius_rsun=expected_radius)
         return self.physical_params
 
     def run_all(self, photometry=None, parallax_mas=None,
@@ -849,14 +2290,24 @@ class WDFitter:
         conf = self.classification['confidence']
         print(f"    类型: {sp_type} (confidence={conf:.2f})")
 
-        print("  [2/5] 单星光谱拟合...")
-        self.fit_single()
-        if self.single_fit:
-            print(f"    Teff = {self.single_fit['teff']} K  "
-                  f"logg = {self.single_fit['logg']:.2f}  "
-                  f"chi2_red = {self.single_fit['chi2_red']:.4f}")
+        print("  [2/5] Balmer 线轮廓拟合 + 全谱对照...")
+        self.fit_single(line_only=False)
+        prior = self.continuum_fit.get('teff') if self.continuum_fit else None
+        self.fit_balmer(teff_prior=prior)
+        if self.balmer_fit:
+            print(f"    Balmer: Teff = {self.balmer_fit['teff']} K  "
+                  f"logg = {self.balmer_fit['logg']:.2f}  "
+                  f"RV = {self.balmer_fit.get('rv_kms', np.nan):.1f} km/s  "
+                  f"chi2_red = {self.balmer_fit['chi2_red']:.4f}  "
+                  f"prior_T={self.balmer_fit.get('teff_prior')}  "
+                  f"grid={self.balmer_fit.get('model_grid')}")
         else:
-            print("    拟合失败")
+            print("    Balmer 拟合失败")
+        if self.continuum_fit:
+            print(f"    Full-spectrum check: Teff = {self.continuum_fit['teff']} K  "
+                  f"logg = {self.continuum_fit['logg']:.2f}  "
+                  f"chi2_red = {self.continuum_fit['chi2_red']:.4f}  "
+                  f"grid={self.continuum_fit.get('model_grid')}")
 
         print("  [3/5] DWD 组合拟合...")
         self.fit_double()
@@ -894,6 +2345,8 @@ class WDFitter:
         return {
             'classification': self.classification,
             'single_fit': self.single_fit,
+            'balmer_fit': self.balmer_fit,
+            'continuum_fit': self.continuum_fit,
             'dwd_fit': self.dwd_fit,
             'sed_fit': self.sed_fit,
             'physical_params': self.physical_params,
@@ -925,12 +2378,19 @@ class WDFitter:
                      'r-', lw=1.0, alpha=0.8,
                      label=f"Model: Teff={sf['teff']}K, logg={sf['logg']:.2f}")
 
+        # 设置合理轴范围，再用轴坐标标注 Balmer 线；这样强发射线/坏点
+        # 不会把文字推到图外，导致整张拟合图被压扁。
+        utils.set_spectrum_axes(ax_spec, self.wave, self.flux,
+                                model=sf['best_model_flux'])
+
         # Balmer 线标注
         for name, lam in BALMER_LINES.items():
+            if not (np.nanmin(self.wave) <= lam <= np.nanmax(self.wave)):
+                continue
             ax_spec.axvline(lam, color='blue', ls=':', alpha=0.3, lw=0.8)
-            ax_spec.text(lam, ax_spec.get_ylim()[1] * 0.95, name,
-                        fontsize=7, rotation=90, va='top', ha='right',
-                        color='blue', alpha=0.5)
+            ax_spec.text(lam, 0.96, name, transform=ax_spec.get_xaxis_transform(),
+                         fontsize=7, rotation=90, va='top', ha='right',
+                         color='blue', alpha=0.55, clip_on=True)
 
         coord_str = f"  RA={ra:.4f} DEC={dec:.4f}" if ra is not None else ""
         sp_type = self.classification['spectral_type'] if self.classification else '?'
@@ -943,17 +2403,40 @@ class WDFitter:
         ax_spec.legend(fontsize=10)
         ax_spec.grid(True, alpha=0.3)
 
-        # 设置合理轴范围
-        utils.set_spectrum_axes(ax_spec, self.wave, self.flux,
-                                model=sf['best_model_flux'])
-
         # 残差
         f_interp = interp1d(sf['best_model_wave'], sf['best_model_flux'],
                             kind='linear', bounds_error=False, fill_value=0)
         model_at_obs = f_interp(self.wave)
         residual = self.flux - model_at_obs
+        if save_path:
+            try:
+                import os
+                import pandas as pd
+                out_dir = os.path.dirname(os.path.abspath(save_path))
+                err = self.err if self.err is not None else np.full_like(self.wave, np.nan)
+                pd.DataFrame({
+                    'wavelength_A': self.wave,
+                    'flux_obs': self.flux,
+                    'flux_err': err,
+                    'flux_model': model_at_obs,
+                    'residual': residual,
+                }).to_csv(os.path.join(out_dir, 'wd_spectral_fit_model.csv'),
+                          index=False)
+                pd.DataFrame({
+                    'wavelength_A': sf['best_model_wave'],
+                    'flux_model_full': sf['best_model_flux'],
+                }).to_csv(os.path.join(out_dir, 'wd_spectral_fit_model_full.csv'),
+                          index=False)
+            except Exception:
+                pass
         ax_res.plot(self.wave, residual, 'k-', lw=0.5, alpha=0.6)
         ax_res.axhline(0, color='red', ls='--', lw=0.8)
+        good_res = residual[np.isfinite(residual)]
+        if len(good_res) > 5:
+            rlo, rhi = np.nanpercentile(good_res, [2, 98])
+            rpad = max((rhi - rlo) * 0.20, np.nanstd(good_res) * 0.05, 1e-6)
+            if np.isfinite(rlo + rhi + rpad) and rhi > rlo:
+                ax_res.set_ylim(rlo - rpad, rhi + rpad)
         ax_res.set_xlabel('Wavelength (A)')
         ax_res.set_ylabel('Residual')
         ax_res.grid(True, alpha=0.3)
@@ -968,7 +2451,12 @@ class WDFitter:
             return None
 
         chi2_grid = self.single_fit['chi2_grid']
-        teffs, loggs = _get_model_grid_params()
+        teffs = self.single_fit.get('teff_grid')
+        loggs = self.single_fit.get('logg_grid')
+        if not teffs or not loggs:
+            teffs, loggs = _get_model_grid_params(
+                model_grid=self.single_fit.get('model_grid', self.model_grid),
+                spectral_type=self.single_fit.get('spectral_type', self._fit_spectral_type()))
 
         # 构建 2D array
         chi2_arr = np.full((len(loggs), len(teffs)), np.nan)
@@ -995,7 +2483,9 @@ class WDFitter:
         plt.colorbar(cs, ax=ax, label='$\\chi^2_{\\rm red}$')
         ax.set_xlabel('$T_{\\rm eff}$ (K)', fontsize=12)
         ax.set_ylabel('log g', fontsize=12)
-        ax.set_title('$\\chi^2$ Map — Koester2 Grid Fit', fontsize=13)
+        ax.set_title(
+            f"$\\chi^2$ Map — {self.single_fit.get('model_grid', 'WD')} Grid Fit",
+            fontsize=13)
         ax.legend(fontsize=10)
         ax.invert_xaxis()
 
@@ -1009,7 +2499,9 @@ class WDFitter:
             return None
 
         sf = self.sed_fit
-        templates = _load_koester2()
+        templates, _, _, _ = _resolve_template_grid(
+            sf.get('model_grid', self.model_grid),
+            sf.get('spectral_type', self._fit_spectral_type()))
         best_tmpl = templates.get((sf['teff_sed'], sf['logg_sed']))
         if best_tmpl is None:
             return None
@@ -1021,6 +2513,11 @@ class WDFitter:
         model_flux = best_tmpl['flux'] * sf['scale']
         ax.plot(model_wave, model_flux, 'b-', lw=0.8, alpha=0.5,
                 label=f"Model: Teff={sf['teff_sed']}K, logg={sf['logg_sed']:.1f}")
+        tail_wave = np.asarray(sf.get('best_model_tail_wave', []), dtype=float)
+        tail_flux = np.asarray(sf.get('best_model_tail_flux', []), dtype=float)
+        if tail_wave.size > 1 and tail_flux.size == tail_wave.size:
+            ax.plot(tail_wave, tail_flux, 'b--', lw=0.8, alpha=0.45,
+                    label='WD Rayleigh-Jeans tail')
 
         # 观测测光点
         color_map = {
@@ -1043,9 +2540,14 @@ class WDFitter:
         ax.set_yscale('log')
         ax.set_xlabel('Wavelength (A)', fontsize=12)
         ax.set_ylabel(r'$f_\lambda$ (erg s$^{-1}$ cm$^{-2}$ A$^{-1}$)', fontsize=12)
+        excess_note = ''
+        if sf.get('ir_excess_flag'):
+            bands = ','.join(sf.get('ir_excess_bands', []))
+            excess_note = f'  IR excess: {bands}'
         ax.set_title(f'SED Fit  Teff={sf["teff_sed"]}K  '
                      f'R={sf["R_Rsun"]:.4f} R$_\\odot$  '
-                     f'$\\chi^2$={sf["chi2_sed"]:.3f}', fontsize=12)
+                     f'$\\chi^2_{{phot}}$={sf["chi2_sed"]:.3f}'
+                     f'{excess_note}', fontsize=12)
         ax.legend(fontsize=10)
         ax.grid(True, alpha=0.3, which='both')
 
@@ -1102,13 +2604,37 @@ class WDFitter:
                 if ew > 0:
                     lines.append(f"    {name}: EW = {ew:.1f} A")
 
-        if self.single_fit:
-            sf = self.single_fit
-            lines.append(f"\n--- Single WD Fit (Koester2 Grid) ---")
+        if self.balmer_fit:
+            sf = self.balmer_fit
+            lines.append(f"\n--- Preferred Balmer Profile Fit (H-beta through H8) ---")
+            lines.append(f"  Template grid = {sf.get('model_grid', 'unknown')}")
+            lines.append(f"  Teff = {sf['teff']} +/- {sf['teff_err']:.0f} K")
+            lines.append(f"  logg = {sf['logg']:.2f} +/- {sf['logg_err']:.2f}")
+            lines.append(f"  chi2_red = {sf['chi2_red']:.6f}")
+            if sf.get('teff_prior') is not None:
+                lines.append(f"  Teff branch prior = {sf.get('teff_prior'):.0f} K "
+                             f"(sigma={sf.get('teff_prior_sigma'):.0f} K)")
+                lines.append(f"  fit score = {sf.get('fit_score', np.nan):.6f}")
+            lines.append(f"  RV shift = {sf.get('rv_kms', np.nan):.1f} km/s")
+            lines.append("  Lines used: " + ', '.join(sf.get('lines_used', [])))
+            lines.append(f"  scale = {sf['scale']:.6e}")
+            if sf.get('scale_radius_rsun') is not None:
+                lines.append(f"  Distance-scale radius = {sf['scale_radius_rsun']:.5f} R_sun "
+                             f"({sf.get('scale_observed_flux_unit_label', 'unknown')})")
+                lines.append(f"  Distance-scale check OK = {sf.get('scale_radius_ok')}")
+
+        if self.continuum_fit:
+            sf = self.continuum_fit
+            lines.append(f"\n--- Full-Spectrum Flux Fit (continuum check) ---")
+            lines.append(f"  Template grid = {sf.get('model_grid', 'unknown')}")
             lines.append(f"  Teff = {sf['teff']} +/- {sf['teff_err']:.0f} K")
             lines.append(f"  logg = {sf['logg']:.2f} +/- {sf['logg_err']:.2f}")
             lines.append(f"  chi2_red = {sf['chi2_red']:.6f}")
             lines.append(f"  scale = {sf['scale']:.6e}")
+            if sf.get('scale_radius_rsun') is not None:
+                lines.append(f"  Distance-scale radius = {sf['scale_radius_rsun']:.5f} R_sun "
+                             f"({sf.get('scale_observed_flux_unit_label', 'unknown')})")
+                lines.append(f"  Distance-scale check OK = {sf.get('scale_radius_ok')}")
 
         if self.dwd_fit:
             d = self.dwd_fit
@@ -1128,7 +2654,19 @@ class WDFitter:
             lines.append(f"  Teff_SED = {s['teff_sed']} K")
             lines.append(f"  logg_SED = {s['logg_sed']:.2f}")
             lines.append(f"  R = {s['R_Rsun']:.4f} R_sun")
-            lines.append(f"  chi2_SED = {s['chi2_sed']:.4f}")
+            lines.append(f"  chi2_SED_photospheric = {s['chi2_sed']:.4f}")
+            if np.isfinite(s.get('chi2_sed_all', np.nan)):
+                lines.append(f"  chi2_SED_all_bands = {s['chi2_sed_all']:.4f}")
+            if s.get('sed_red_tail_bands'):
+                lines.append("  Red-tail WD model bands = "
+                             + ", ".join(s.get('sed_red_tail_bands', [])))
+            lines.append(f"  IR excess flag = {s.get('ir_excess_flag', False)}")
+            if s.get('ir_excess_bands'):
+                lines.append("  IR excess bands = "
+                             + ", ".join(s.get('ir_excess_bands', [])))
+            if np.isfinite(s.get('max_ir_excess_dex', np.nan)):
+                lines.append(f"  Max IR excess = {s['max_ir_excess_dex']:.3f} dex "
+                             f"({s.get('max_ir_excess_sigma', np.nan):.1f} sigma)")
 
         if self.physical_params:
             p = self.physical_params
@@ -1145,6 +2683,15 @@ class WDFitter:
                 lines.append(f"  M_progenitor = {p['m_progenitor']:.3f} M_sun")
                 lines.append(f"  MS lifetime = {p['ms_lifetime_gyr']:.4f} Gyr")
             lines.append(f"  Source: {p['source']}")
+            if 'distance_pc' in p:
+                lines.append(f"  Distance = {p['distance_pc']:.2f} pc")
+            if p.get('gaia_hr_source'):
+                lines.append(f"  Gaia HR check: M={p.get('gaia_hr_mass', np.nan):.3f} "
+                             f"M_sun, Teff={p.get('gaia_hr_teff', np.nan):.0f} K, "
+                             f"logg={p.get('gaia_hr_logg', np.nan):.3f}, "
+                             f"t_cool={p.get('gaia_hr_cooling_age_gyr', np.nan):.3f} Gyr")
+                lines.append(f"  Gaia - spec: dTeff={p.get('delta_teff_gaia_minus_spec', np.nan):+.0f} K, "
+                             f"dlogg={p.get('delta_logg_gaia_minus_spec', np.nan):+.3f}")
 
         with open(path, 'w', encoding='utf-8') as f:
             f.write('\n'.join(lines) + '\n')
@@ -1166,12 +2713,35 @@ class WDFitter:
             row['misclassification_flag'] = c.get('misclassification_flag', False)
             row['nonstellar_score'] = c.get('nonstellar_score', 0.0)
             row['anomaly_flags'] = ';'.join(c.get('anomaly_flags', []))
-        if self.single_fit:
-            sf = self.single_fit
+        if self.balmer_fit:
+            sf = self.balmer_fit
             row.update({
                 'teff': sf['teff'], 'teff_err': sf['teff_err'],
                 'logg': sf['logg'], 'logg_err': sf['logg_err'],
                 'chi2_red': sf['chi2_red'],
+                'fit_method': sf.get('method', 'Balmer_profile_Hbeta_to_H8'),
+                'model_grid': sf.get('model_grid'),
+                'fit_score': sf.get('fit_score'),
+                'teff_prior': sf.get('teff_prior'),
+                'teff_prior_sigma': sf.get('teff_prior_sigma'),
+                'balmer_rv_kms': sf.get('rv_kms'),
+                'balmer_lines_used': ';'.join(sf.get('lines_used', [])),
+                'balmer_scale_radius_rsun': sf.get('scale_radius_rsun'),
+                'balmer_scale_radius_ok': sf.get('scale_radius_ok'),
+                'balmer_scale_flux_unit': sf.get('scale_observed_flux_unit_label'),
+            })
+        if self.continuum_fit:
+            sf = self.continuum_fit
+            row.update({
+                'continuum_teff': sf['teff'],
+                'continuum_teff_err': sf['teff_err'],
+                'continuum_logg': sf['logg'],
+                'continuum_logg_err': sf['logg_err'],
+                'continuum_chi2_red': sf['chi2_red'],
+                'continuum_model_grid': sf.get('model_grid'),
+                'continuum_scale_radius_rsun': sf.get('scale_radius_rsun'),
+                'continuum_scale_radius_ok': sf.get('scale_radius_ok'),
+                'continuum_scale_flux_unit': sf.get('scale_observed_flux_unit_label'),
             })
         if self.dwd_fit:
             d = self.dwd_fit
@@ -1187,6 +2757,14 @@ class WDFitter:
             row.update({
                 'teff_sed': s['teff_sed'], 'logg_sed': s['logg_sed'],
                 'R_Rsun': s['R_Rsun'], 'chi2_sed': s['chi2_sed'],
+                'chi2_sed_all': s.get('chi2_sed_all'),
+                'sed_fit_bands': ';'.join(s.get('sed_fit_bands', [])),
+                'sed_red_tail_bands': ';'.join(s.get('sed_red_tail_bands', [])),
+                'ir_excess_flag': s.get('ir_excess_flag'),
+                'ir_excess_bands': ';'.join(s.get('ir_excess_bands', [])),
+                'max_ir_excess_dex': s.get('max_ir_excess_dex'),
+                'max_ir_excess_sigma': s.get('max_ir_excess_sigma'),
+                'sed_model_grid': s.get('model_grid'),
             })
         if self.physical_params:
             p = self.physical_params
@@ -1197,6 +2775,13 @@ class WDFitter:
                 'm_progenitor': p.get('m_progenitor'),
                 'ms_lifetime_gyr': p.get('ms_lifetime_gyr'),
                 'param_source': p.get('source', ''),
+                'distance_pc': p.get('distance_pc'),
+                'gaia_hr_mass': p.get('gaia_hr_mass'),
+                'gaia_hr_teff': p.get('gaia_hr_teff'),
+                'gaia_hr_logg': p.get('gaia_hr_logg'),
+                'gaia_hr_cooling_age_gyr': p.get('gaia_hr_cooling_age_gyr'),
+                'delta_teff_gaia_minus_spec': p.get('delta_teff_gaia_minus_spec'),
+                'delta_logg_gaia_minus_spec': p.get('delta_logg_gaia_minus_spec'),
             })
 
         if not row:

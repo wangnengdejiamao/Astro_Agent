@@ -1,30 +1,30 @@
 """
-SPHEREx 近红外低分辨率光谱
-============================
-NASA SPHEREx 于 2025 年 3 月发射。
-波长覆盖: 0.75 - 5.0 um (6 个探测器, R~40-130)
-数据通过 IRSA (irsa.ipac.caltech.edu) 发布。
+SPHEREx 近红外谱光度
+====================
 
-数据获取方式:
-1. IRSA SIA v2 搜索 SPHEREx spectral image 切片
-2. IRSA IBE 接口下载目标坐标处的 cutout
-3. 从各通道 cutout 中提取中心像素流量, 组装低分辨率光谱
+IRSA 的 SPHEREx Spectrophotometry Tool 对已知坐标做 Tractor forced
+photometry，并返回逐波长/逐曝光的校准谱光度表。科学输出应当保留
+``mjd``、``flags``、``fit_ql`` 等质量列；不能把 SPHEREx 低分辨率谱再
+合成为几个伪宽带点后参与 SED chi2。
 
-SPHEREx Level 2 数据: 每个 FITS 文件是一个波长通道的 sky image
-  - IMAGE: 流量图 (MJy/sr)
-  - VARIANCE: 方差图
-  - WCS-WAVE: 波长信息 (um)
+本模块默认尝试调用 IRSA Firefly spectrophotometry processor；若在线任务
+未返回表格，会从 SIA Level-2 cutout 逐通道抽取 raw-channel 表。这个
+fallback 不做 detector 宽波段去重/合 bin，也不冒充官方 Tractor forced
+photometry，``method`` 会明确标出来源。
 
 用法:
-    from astro_toolbox.spherex import query_spectrum, get_photometry
+    from astro_toolbox.spherex import query_spectrum, save_spectrum_csv
     spec = query_spectrum(232.3955, 29.4672)
+    save_spectrum_csv(spec, "./out")
 """
+import json
 import numpy as np
 import io
 from . import config, utils
 
 # IRSA SIA v2 端点
 SIA_V2_URL = "https://irsa.ipac.caltech.edu/SIA/v2"
+FIREFLY_SYNC_URL = "https://irsa.ipac.caltech.edu/applications/spherex/CmdSrv/sync"
 
 # SPHEREx SIA v2 collection 名称 (按优先级: 最新的在前)
 SPHEREX_COLLECTIONS = ['spherex_qr2', 'spherex_qr2_deep', 'SPHEREx']
@@ -54,12 +54,19 @@ def _mjy_sr_to_cgs(flux_mjy_sr, wave_um, pixel_sr):
 
 
 def query_spectrum(ra, dec, radius_arcsec=None,
-                   collection=None, cutout_size=5):
+                   collection=None, cutout_size=5,
+                   prefer_spectrophotometry=True,
+                   background_region_px=15,
+                   timeout=None,
+                   allow_cutout_fallback=True):
     """
-    查询 SPHEREx 低分辨率光谱。
+    查询 SPHEREx 谱光度。
 
-    通过 IRSA SIA v2 搜索覆盖目标的所有波长通道,
-    下载每个通道的小 cutout, 提取中心像素流量组装光谱。
+    默认优先使用 IRSA SPHEREx Spectrophotometry Tool 的校准 forced
+    photometry 表，输出结构包含 ``lambda_um, lambda_Flambda,
+    lambda_Flambda_err, flux_jy, flux_err_jy`` 以及 MJD/flags/fit_ql 等
+    质量列。在线表格不可用时，默认回退到 SIA Level-2 raw-channel
+    cutout 抽取：保留每个 obs_publisher_did/LVF 通道，不合成 6 个宽波段。
 
     Args:
         ra, dec: 目标坐标 (度)
@@ -77,80 +84,405 @@ def query_spectrum(ra, dec, radius_arcsec=None,
         }
         或 None
     """
+    if prefer_spectrophotometry:
+        spec = _query_firefly_spectrophotometry(
+            ra, dec, background_region_px=background_region_px,
+            timeout=timeout)
+        if spec is not None:
+            return spec
+        if not allow_cutout_fallback:
+            print("  SPHEREx: 未取得 IRSA 定标谱光度表；不使用 SIA raw-channel fallback")
+            return None
+
+    return _query_cutout_pixel_spectrum(
+        ra, dec, collection=collection, cutout_size=cutout_size)
+
+
+def _query_cutout_pixel_spectrum(ra, dec, collection=None, cutout_size=5):
+    """SIA Level-2 raw-channel cutout extraction.
+
+    这是 raw-image 兜底路径，不是 IRSA 官方 Tractor forced photometry。
+    它逐个 SIA row 下载 cutout，保留所有通道和负 flux，不再压缩成 D1-D6
+    这类宽波段点。
+    """
+    import pandas as pd
+
     # 1. SIA v2 搜索: 找到覆盖目标的所有 spectral image 切片
     image_list = _query_sia_v2(ra, dec, collection)
     if image_list is None or len(image_list) == 0:
         print("  SPHEREx: 该坐标处无数据覆盖")
         return None
 
-    print(f"  SPHEREx: 找到 {len(image_list)} 个通道, 正在提取光谱...")
-
-    # 2. 按波长去重: 同一波段多次观测取最近的
-    unique_images = _deduplicate_by_wavelength(image_list)
-
-    # 3. 下载 cutout 并提取中心像素流量
-    wavelengths = []
-    fluxes_mjy = []
-    errors_mjy = []
+    print(f"  SPHEREx: 找到 {len(image_list)} 个 SIA raw 通道, 正在逐通道抽取...")
 
     session = utils.get_session(SIA_V2_URL)
+    pixel_arcsec = 6.2
+    pixel_sr = (pixel_arcsec / 206265.0) ** 2
+    c_A_s = 2.99792458e18
 
-    for img_info in unique_images:
+    rows = []
+    n_failed = 0
+    for img_info in image_list:
         result = _extract_pixel_from_cutout(
             img_info, ra, dec, cutout_size, session)
         if result is not None:
-            wavelengths.append(result['wave_um'])
-            fluxes_mjy.append(result['flux_mjy_sr'])
-            errors_mjy.append(result['error_mjy_sr'])
+            rows.append(_cutout_channel_row(
+                img_info, result, ra, dec, pixel_sr, c_A_s))
+        else:
+            n_failed += 1
 
-    if len(wavelengths) == 0:
-        print("  SPHEREx: 无法从 cutout 中提取有效流量")
+    if not rows:
+        print("  SPHEREx: 无法从 raw-channel cutout 中提取有效数据")
         return None
 
-    # 按波长排序
-    wave_um = np.array(wavelengths)
-    flux_mjy = np.array(fluxes_mjy)
-    err_mjy = np.array(errors_mjy)
+    table = pd.DataFrame(rows)
+    table = table.sort_values(
+        by=['lambda_um', 'mjd', 'obs_publisher_did'],
+        kind='mergesort',
+    ).reset_index(drop=True)
 
-    sort_idx = np.argsort(wave_um)
-    wave_um = wave_um[sort_idx]
-    flux_mjy = flux_mjy[sort_idx]
-    err_mjy = err_mjy[sort_idx]
+    wave_A = table['wavelength_A'].to_numpy(dtype=float)
+    flux_cgs = table['flux_flam'].to_numpy(dtype=float)
+    err_cgs = table['fluxerr_flam'].to_numpy(dtype=float)
+    wave_um = table['lambda_um'].to_numpy(dtype=float)
 
-    # 转换为 CGS (erg/s/cm^2/A)
-    # SPHEREx 像素为 6.2 arcsec, pixel solid angle
-    pixel_arcsec = 6.2
-    pixel_sr = (pixel_arcsec / 206265.0) ** 2
-
-    wave_A = wave_um * 1e4
-    flux_cgs = _mjy_sr_to_cgs(flux_mjy, wave_um, pixel_sr)
-    err_cgs = _mjy_sr_to_cgs(np.abs(err_mjy), wave_um, pixel_sr)
-
-    # 背景扣除后流量可能为负/零 (源太暗), 只保留正值通道
-    positive = flux_cgs > 0
-    n_positive = np.sum(positive)
-    n_total = len(wave_A)
-    if n_positive == 0:
-        print(f"  SPHEREx: 背景扣除后无正流量通道 ({n_total} channels), 源可能太暗")
-        return None
-
-    if n_positive < n_total:
-        print(f"  SPHEREx: 背景扣除后 {n_total - n_positive}/{n_total} 通道流量<=0, 已排除")
-        wave_A = wave_A[positive]
-        flux_cgs = flux_cgs[positive]
-        err_cgs = err_cgs[positive]
-        flux_mjy = flux_mjy[positive]
-
-    print(f"  SPHEREx: 提取到 {len(wave_A)} 个有效通道 (已扣除背景)")
+    n_nonpos = int(np.sum(table['flux_jy'].to_numpy(dtype=float) <= 0))
+    msg = (f"  SPHEREx: 提取到 {len(table)} 个 raw 通道"
+           f" ({n_nonpos} 个 flux<=0, 已保留; 未合bin)")
+    if n_failed:
+        msg += f"; {n_failed} 个 cutout 失败"
+    print(msg)
 
     return {
         'survey': 'SPHEREx',
+        'method': 'sia_cutout_center_pixel_raw_channels',
+        'is_official_spectrophotometry': False,
         'ra': ra, 'dec': dec,
         'wavelength': wave_A,
         'flux': flux_cgs,
         'error': err_cgs,
-        'flux_mjy_sr': flux_mjy,
+        'lambda_um': wave_um,
+        'lambda_Flambda': table['lambda_Flambda'].to_numpy(dtype=float),
+        'lambda_Flambda_err': table['lambda_Flambda_err'].to_numpy(dtype=float),
+        'flux_jy': table['flux_jy'].to_numpy(dtype=float),
+        'flux_err_jy': table['flux_err_jy'].to_numpy(dtype=float),
+        'flux_mjy_sr': table['flux_mjy_sr'].to_numpy(dtype=float),
+        'table': table,
         'n_channels': len(wave_A),
+    }
+
+
+def _cutout_channel_row(img_info, result, ra, dec, pixel_sr, c_A_s):
+    """Build one raw-channel row in official-like microJy plus physical units."""
+    wave_um = float(result['wave_um'])
+    wave_A = wave_um * 1e4
+    flux_mjy = float(result['flux_mjy_sr'])
+    err_mjy = abs(float(result.get('error_mjy_sr', np.nan)))
+
+    flux_jy = flux_mjy * pixel_sr * 1e6
+    flux_err_jy = err_mjy * pixel_sr * 1e6 if np.isfinite(err_mjy) else np.nan
+    lambda_Flambda = flux_jy * 1e-23 * c_A_s / wave_A
+    lambda_Flambda_err = flux_err_jy * 1e-23 * c_A_s / wave_A
+    flux_flam = lambda_Flambda / wave_A
+    fluxerr_flam = lambda_Flambda_err / wave_A
+
+    row = {
+        'ra': float(ra),
+        'dec': float(dec),
+        'x_image': result.get('x_image', np.nan),
+        'y_image': result.get('y_image', np.nan),
+        'mjd': result.get('mjd', img_info.get('t_avg', np.nan)),
+        'mjd_beg': result.get('mjd_beg', img_info.get('t_min', np.nan)),
+        'mjd_end': result.get('mjd_end', img_info.get('t_max', np.nan)),
+        'date_obs': result.get('date_obs'),
+        'flux_bkg': result.get('background_mjy_sr', np.nan),
+        'raw_flux_mjy_sr': result.get('raw_flux_mjy_sr', np.nan),
+        'local_bkg_flg': True,
+        'flags': result.get('flags', np.nan),
+        'fit_ql': np.nan,
+        'deep_flg': bool(result.get('deep_flg', False)),
+        'det_id': result.get('det_id', _det_id_from_band(img_info.get('band'))),
+        'lvf_id': result.get('lvf_id', np.nan),
+        'obs_id': result.get('obs_id', img_info.get('obs_id')),
+        'obs_publisher_did': img_info.get('obs_publisher_did'),
+        'band': img_info.get('band'),
+        'lambda': wave_um,
+        'lambda_um': wave_um,
+        'lambda_width': float(result.get('bandwidth_um', np.nan)),
+        'lambda_width_um': float(result.get('bandwidth_um', np.nan)),
+        'flux': flux_jy * 1e6,
+        'flux_err': flux_err_jy * 1e6,
+        'flux_uJy': flux_jy * 1e6,
+        'flux_err_uJy': flux_err_jy * 1e6,
+        'flux_jy': flux_jy,
+        'flux_err_jy': flux_err_jy,
+        'lambda_Flambda': lambda_Flambda,
+        'lambda_Flambda_err': lambda_Flambda_err,
+        'wavelength_A': wave_A,
+        'flux_flam': flux_flam,
+        'fluxerr_flam': fluxerr_flam,
+        'flam': flux_flam,
+        'flux_cgs': flux_flam,
+        'fluxerr_cgs': fluxerr_flam,
+        'flux_mjy_sr': flux_mjy,
+        'error_mjy_sr': err_mjy,
+        'extraction_method': 'center_pixel_local_background',
+        'cutout_x_center': result.get('cutout_x_center', np.nan),
+        'cutout_y_center': result.get('cutout_y_center', np.nan),
+        'access_url': img_info.get('access_url'),
+        'cloud_access': img_info.get('cloud_access'),
+        'dist_to_point_deg': img_info.get('dist_to_point', np.nan),
+    }
+    return row
+
+
+def _det_id_from_band(band):
+    if band is None:
+        return np.nan
+    import re
+    match = re.search(r'D(\d+)', str(band))
+    if match:
+        return int(match.group(1))
+    return np.nan
+
+
+def _interpolate_wcs_wave(wcs_data, x_image, y_image,
+                          fallback_wave=0.0, fallback_width=0.03):
+    """Interpolate SPHEREx WCS-WAVE VALUES at full-frame detector pixels."""
+    try:
+        if not np.isfinite(x_image) or not np.isfinite(y_image):
+            return fallback_wave, fallback_width
+        x_grid = np.asarray(wcs_data['X'], dtype=float).ravel()
+        y_grid = np.asarray(wcs_data['Y'], dtype=float).ravel()
+        values = np.asarray(wcs_data['VALUES'], dtype=float)
+        if values.ndim != 3 or values.shape[-1] != 2:
+            return fallback_wave, fallback_width
+        wave_by_y = np.array([
+            np.interp(float(x_image), x_grid, row[:, 0])
+            for row in values
+        ])
+        width_by_y = np.array([
+            np.interp(float(x_image), x_grid, row[:, 1])
+            for row in values
+        ])
+        wave_um = float(np.interp(float(y_image), y_grid, wave_by_y))
+        width_um = float(np.interp(float(y_image), y_grid, width_by_y))
+        return wave_um, width_um
+    except Exception:
+        return fallback_wave, fallback_width
+
+
+def _firefly_request(ra, dec, background_region_px=15):
+    tbl_id = f"Spec-photo-tbl-{int(abs(ra * 1000000))}-{int(abs(dec * 1000000))}"
+    return {
+        'startIdx': 0,
+        'pageSize': 2147483647,
+        'tbl_id': tbl_id,
+        'id': 'SpectrophotometryProcessor',
+        'UserTargetWorldPt': f'{ra};{dec};EQ_J2000',
+        'shapeFit': 'false',
+        'bgEstimationRegion': str(int(background_region_px)),
+        'META_INFO': {
+            'title': 'Spectrophotometry Targets',
+            'tbl_id': tbl_id,
+            'dataServiceOptions': {
+                'DataProductFactoryOptions': {'datalinkDisableMoreDrop': True},
+                'generateDownloadFileName': True,
+                'obsCoreDownloadProps': {'downloadType': 'package'},
+            },
+        },
+    }
+
+
+def _query_firefly_spectrophotometry(ra, dec, background_region_px=15,
+                                     timeout=None):
+    """
+    Submit a SPHEREx SpectrophotometryProcessor table request.
+
+    Firefly may background long jobs.  When the HTTP response does not contain
+    a table model, this function returns None so the caller can use the
+    quick-look fallback while the user can still run/download the IRSA job from
+    the web UI.
+    """
+    req = _firefly_request(ra, dec, background_region_px)
+    session = utils.get_session(FIREFLY_SYNC_URL)
+    timeout = timeout or (config.CONNECT_TIMEOUT, config.TIMEOUT)
+    try:
+        resp = session.post(
+            FIREFLY_SYNC_URL,
+            params={'cmd': 'tableSearch'},
+            data={
+                'cmd': 'tableSearch',
+                'request': json.dumps(req, separators=(',', ':')),
+            },
+            timeout=timeout,
+        )
+        resp.raise_for_status()
+        payload = resp.json()
+    except Exception as exc:
+        print(f"  SPHEREx spectrophotometry 查询未返回表格: {exc}")
+        return None
+
+    data = payload
+    if isinstance(payload, list) and payload:
+        item = payload[0]
+        if isinstance(item, dict):
+            if item.get('success') is False:
+                print(f"  SPHEREx spectrophotometry 失败: {item.get('error', '')}")
+                return None
+            data = item.get('data', item)
+    elif isinstance(payload, dict) and payload.get('success') is True:
+        data = payload.get('data', payload)
+
+    df = _table_payload_to_dataframe(data)
+    if df is None or len(df) == 0:
+        print("  SPHEREx spectrophotometry: 在线任务没有立即返回谱表")
+        return None
+
+    return _spectrophotometry_dataframe_to_result(
+        df, ra=ra, dec=dec, method='irsa_firefly_spectrophotometry')
+
+
+def _table_payload_to_dataframe(payload):
+    """Convert Firefly table-model JSON or a list/dict payload to DataFrame."""
+    import pandas as pd
+    if payload is None:
+        return None
+    if isinstance(payload, pd.DataFrame):
+        return payload
+    if isinstance(payload, list):
+        return pd.DataFrame(payload)
+    if isinstance(payload, dict):
+        if 'tableData' in payload:
+            table = payload.get('tableData') or {}
+            cols = table.get('columns') or payload.get('tableMeta', {}).get('columns')
+            data = table.get('data') or []
+            names = []
+            if cols:
+                for col in cols:
+                    if isinstance(col, dict):
+                        names.append(col.get('name') or col.get('label'))
+                    else:
+                        names.append(str(col))
+            if names and data:
+                return pd.DataFrame(data, columns=names[:len(data[0])])
+            if data:
+                return pd.DataFrame(data)
+        for key in ('data', 'rows', 'table'):
+            value = payload.get(key)
+            if isinstance(value, list):
+                return pd.DataFrame(value)
+            if isinstance(value, dict):
+                nested = _table_payload_to_dataframe(value)
+                if nested is not None:
+                    return nested
+    return None
+
+
+def _find_col(df, candidates):
+    norm = {}
+    for col in df.columns:
+        key = str(col).strip().lower().replace(' ', '_').replace('-', '_')
+        norm[key] = col
+    for cand in candidates:
+        key = cand.strip().lower().replace(' ', '_').replace('-', '_')
+        if key in norm:
+            return norm[key]
+    return None
+
+
+def _spectrophotometry_dataframe_to_result(df, ra=None, dec=None,
+                                           method='irsa_spectrophotometry'):
+    """Standardize IRSA/sample SPHEREx tables into toolbox spectrum arrays."""
+    import pandas as pd
+    df = df.copy()
+    c_wave_um = _find_col(df, ['lambda_um', 'wavelength', 'lambda', 'wave_um'])
+    c_lfl = _find_col(df, ['lambda_Flambda', 'lambda_flambda', 'lambda_f_lambda'])
+    c_lfl_err = _find_col(df, ['lambda_Flambda_err', 'lambda_flambda_err'])
+    c_fjy = _find_col(df, ['flux_jy', 'fnu_jy'])
+    c_fjy_err = _find_col(df, ['flux_err_jy', 'flux_jy_err', 'fnu_err_jy'])
+    c_flux = _find_col(df, ['flux', 'flux_ujy', 'fnu_ujy'])
+    c_flux_err = _find_col(df, ['flux_err', 'fluxerr', 'flux_error', 'flux_err_ujy'])
+
+    if c_wave_um is None:
+        return None
+    wave_um = pd.to_numeric(df[c_wave_um], errors='coerce').to_numpy(dtype=float)
+    wave_A = wave_um * 1e4
+    c_A_s = 2.99792458e18
+
+    if c_lfl is not None:
+        lambda_Flambda = pd.to_numeric(df[c_lfl], errors='coerce').to_numpy(dtype=float)
+        lambda_Flambda_err = (
+            pd.to_numeric(df[c_lfl_err], errors='coerce').to_numpy(dtype=float)
+            if c_lfl_err is not None else np.full_like(lambda_Flambda, np.nan)
+        )
+        flux_jy = lambda_Flambda * wave_A / c_A_s * 1e23
+        flux_err_jy = lambda_Flambda_err * wave_A / c_A_s * 1e23
+    else:
+        if c_fjy is not None:
+            flux_jy = pd.to_numeric(df[c_fjy], errors='coerce').to_numpy(dtype=float)
+            flux_err_jy = (
+                pd.to_numeric(df[c_fjy_err], errors='coerce').to_numpy(dtype=float)
+                if c_fjy_err is not None else np.full_like(flux_jy, np.nan)
+            )
+        elif c_flux is not None:
+            flux_uJy = pd.to_numeric(df[c_flux], errors='coerce').to_numpy(dtype=float)
+            flux_err_uJy = (
+                pd.to_numeric(df[c_flux_err], errors='coerce').to_numpy(dtype=float)
+                if c_flux_err is not None else np.full_like(flux_uJy, np.nan)
+            )
+            flux_jy = flux_uJy * 1e-6
+            flux_err_jy = flux_err_uJy * 1e-6
+        else:
+            return None
+        lambda_Flambda = flux_jy * 1e-23 * c_A_s / wave_A
+        lambda_Flambda_err = flux_err_jy * 1e-23 * c_A_s / wave_A
+
+    flux_flam = lambda_Flambda / wave_A
+    fluxerr_flam = lambda_Flambda_err / wave_A
+    valid = np.isfinite(wave_A) & np.isfinite(flux_flam) & (wave_A > 0)
+    if np.sum(valid) == 0:
+        return None
+    order = np.argsort(wave_A[valid])
+    idx = np.where(valid)[0][order]
+
+    std = pd.DataFrame({
+        'lambda_um': wave_um[idx],
+        'lambda_Flambda': lambda_Flambda[idx],
+        'lambda_Flambda_err': lambda_Flambda_err[idx],
+        'flux_jy': flux_jy[idx],
+        'flux_err_jy': flux_err_jy[idx],
+        'wavelength_A': wave_A[idx],
+        'flux_flam': flux_flam[idx],
+        'fluxerr_flam': fluxerr_flam[idx],
+        'flam': flux_flam[idx],
+        'flux_cgs': flux_flam[idx],
+        'fluxerr_cgs': fluxerr_flam[idx],
+    })
+    for name in ['lambda_width', 'flags', 'fit_ql', 'flux_bkg',
+                 'lvf_id', 'det_id', 'deep_flg', 'mjd',
+                 'x_image', 'y_image', 'ra', 'dec',
+                 'obs_id', 'obs_publisher_did', 'band']:
+        col = _find_col(df, [name])
+        if col is not None:
+            std[name] = np.asarray(df[col])[idx]
+
+    return {
+        'survey': 'SPHEREx',
+        'method': method,
+        'ra': ra, 'dec': dec,
+        'wavelength': std['wavelength_A'].to_numpy(dtype=float),
+        'flux': std['flux_flam'].to_numpy(dtype=float),
+        'error': std['fluxerr_flam'].to_numpy(dtype=float),
+        'lambda_um': std['lambda_um'].to_numpy(dtype=float),
+        'lambda_Flambda': std['lambda_Flambda'].to_numpy(dtype=float),
+        'lambda_Flambda_err': std['lambda_Flambda_err'].to_numpy(dtype=float),
+        'flux_jy': std['flux_jy'].to_numpy(dtype=float),
+        'flux_err_jy': std['flux_err_jy'].to_numpy(dtype=float),
+        'n_channels': int(len(std)),
+        'table': std,
+        'raw_columns': list(df.columns),
+        'is_official_spectrophotometry': True,
     }
 
 
@@ -188,9 +520,12 @@ def _query_sia_v2(ra, dec, collection=None):
                     if len(t) == 0:
                         continue
 
-                    # 获取列名映射 (VOTable field name → column index)
-                    field_names = [f.name for f in table.fields]
                     col_names = t.colnames
+                    name_to_col = {
+                        f.name: col_names[j]
+                        for j, f in enumerate(table.fields)
+                        if f.name is not None
+                    }
 
                     # 关键列索引
                     idx_map = {}
@@ -222,6 +557,16 @@ def _query_sia_v2(ra, dec, collection=None):
                         if not url or url == '--':
                             continue
                         info = {'access_url': url}
+                        for name in [
+                            'obs_id', 'obs_publisher_did', 'cloud_access',
+                            't_min', 't_max', 't_resolution',
+                            's_ra', 's_dec', 's_pixel_scale',
+                            'dist_to_point', 'access_format', 'access_estsize',
+                            'obs_collection',
+                        ]:
+                            col = name_to_col.get(name)
+                            if col is not None:
+                                info[name] = _scalar(row[col])
                         if em_min_col:
                             info['em_min'] = float(row[em_min_col])
                             info['em_max'] = float(row[em_max_col])
@@ -240,6 +585,22 @@ def _query_sia_v2(ra, dec, collection=None):
             continue
 
     return None
+
+
+def _scalar(value):
+    """Convert astropy/numpy scalar-ish values to plain Python values."""
+    try:
+        if hasattr(value, 'mask') and bool(value.mask):
+            return np.nan
+    except Exception:
+        pass
+    try:
+        value = value.item()
+    except Exception:
+        pass
+    if isinstance(value, bytes):
+        return value.decode('utf-8', errors='replace')
+    return value
 
 
 def _deduplicate_by_wavelength(image_list, tol_um=0.01):
@@ -294,8 +655,26 @@ def _extract_pixel_from_cutout(img_info, ra, dec, cutout_size, session):
             return None
 
         img = hdul[1].data
+        hdr = hdul[1].header
         ny, nx = img.shape
         cy, cx = ny // 2, nx // 2
+        cutout_x, cutout_y = float(cx + 1), float(cy + 1)
+        try:
+            from astropy.wcs import WCS
+            cutout_x, cutout_y = WCS(hdr).all_world2pix([[ra, dec]], 1)[0]
+            cutout_x, cutout_y = float(cutout_x), float(cutout_y)
+        except Exception:
+            pass
+        x_offset = hdr.get('CRPIX1A', hdr.get('CRPIX1W'))
+        y_offset = hdr.get('CRPIX2A', hdr.get('CRPIX2W'))
+        x_image = (
+            cutout_x - float(x_offset)
+            if x_offset is not None else np.nan
+        )
+        y_image = (
+            cutout_y - float(y_offset)
+            if y_offset is not None else np.nan
+        )
 
         # 中心像素原始流量 (MJy/sr)
         raw_flux = float(img[cy, cx])
@@ -315,6 +694,12 @@ def _extract_pixel_from_cutout(img_info, ra, dec, cutout_size, session):
             bg = 0.0
 
         flux = raw_flux - bg
+        flags = np.nan
+        if len(hdul) > 2 and hdul[2].data is not None:
+            try:
+                flags = int(hdul[2].data[cy, cx])
+            except Exception:
+                flags = np.nan
 
         # 方差 (VARIANCE HDU, index 3)
         error = 0.0
@@ -331,20 +716,19 @@ def _extract_pixel_from_cutout(img_info, ra, dec, cutout_size, session):
                 error = np.sqrt(var_center + bg_var)
 
         # 波长 (WCS-WAVE HDU, index 6)
-        # VALUES shape: (ny_grid, nx_grid, 2) → [wavelength_um, bandwidth_um]
+        # X/Y 是 full-frame 像素网格，VALUES[..., 0/1] 是 wavelength/width。
+        # IBE cutout header 的 CRPIX1A/2A 给出 cutout → full-frame 偏移；
+        # 必须在源的 full-frame 像素位置插值，不能取 WCS-WAVE 网格中心。
         wave_um = img_info.get('wave_um', 0)
         bandwidth_um = 0.03  # default
         if len(hdul) > 6 and hdul[6].data is not None:
             try:
                 wcs_data = hdul[6].data[0]
-                values = wcs_data['VALUES']
-                # shape is (ny, nx, 2): last dim is [wave, bandwidth]
-                if values.ndim == 3 and values.shape[-1] == 2:
-                    # 取中心位置的波长
-                    wy = values.shape[0] // 2
-                    wx = values.shape[1] // 2
-                    wave_um = float(values[wy, wx, 0])
-                    bandwidth_um = float(values[wy, wx, 1])
+                wave_um, bandwidth_um = _interpolate_wcs_wave(
+                    wcs_data, x_image, y_image,
+                    fallback_wave=wave_um,
+                    fallback_width=bandwidth_um,
+                )
             except Exception:
                 pass
 
@@ -358,6 +742,21 @@ def _extract_pixel_from_cutout(img_info, ra, dec, cutout_size, session):
             'bandwidth_um': bandwidth_um,
             'flux_mjy_sr': flux,
             'error_mjy_sr': error,
+            'raw_flux_mjy_sr': raw_flux,
+            'background_mjy_sr': float(bg),
+            'flags': flags,
+            'mjd': hdr.get('MJD-AVG', hdr.get('MJD-OBS', np.nan)),
+            'mjd_beg': hdr.get('MJD-BEG', hdr.get('MJD-OBS', np.nan)),
+            'mjd_end': hdr.get('MJD-END', hdr.get('MJD-AVG', np.nan)),
+            'date_obs': hdr.get('DATE-OBS'),
+            'lvf_id': hdr.get('EXPIDN'),
+            'obs_id': hdr.get('OBSID', img_info.get('obs_id')),
+            'det_id': hdr.get('DETECTOR', _det_id_from_band(img_info.get('band'))),
+            'deep_flg': bool(hdr.get('OBS_IN_SBAND', False)),
+            'x_image': x_image,
+            'y_image': y_image,
+            'cutout_x_center': cutout_x,
+            'cutout_y_center': cutout_y,
         }
 
     except Exception:
@@ -366,50 +765,13 @@ def _extract_pixel_from_cutout(img_info, ra, dec, cutout_size, session):
 
 def get_photometry(ra, dec, radius_arcsec=config.SEARCH_RADIUS_ARCSEC):
     """
-    获取 SPHEREx 宽带测光 (从光谱合成)。
+    兼容旧接口。
 
-    从 SPHEREx 低分辨率光谱中合成几个关键波段的测光,
-    用于 SED 拟合。
-
-    Returns:
-        dict: {band_name: (mag, mag_err, wave_A)}
+    SPHEREx spectrophotometry 不是宽带测光。为了避免把低分辨谱合成为
+    伪宽带点并错误惩罚 SED chi2，这里不再返回 SPHEREx_* 测光点。
+    请用 ``query_spectrum()`` 获取带 MJD/flags/fit_ql 的校准谱光度表。
     """
-    spec = query_spectrum(ra, dec)
-    if spec is None:
-        return {}
-
-    wave = spec['wavelength']  # Angstrom
-    flux = spec['flux']        # erg/s/cm^2/A
-    error = spec.get('error', np.zeros_like(flux))
-
-    # 合成宽带: 在各波长范围内取加权平均
-    synth_bands = {
-        'SPHEREx_1.0': (7500, 12000),     # D1: ~0.75-1.2 um
-        'SPHEREx_1.5': (12000, 17000),     # D2: ~1.1-1.7 um
-        'SPHEREx_2.0': (17000, 25000),     # D3: ~1.6-2.5 um
-        'SPHEREx_3.0': (25000, 40000),     # D4: ~2.4-3.8 um + D5: ~3.8-4.4 um
-        'SPHEREx_4.5': (40000, 51000),     # D6: ~4.4-5.0 um
-    }
-
-    phot = {}
-    for band_name, (w_lo, w_hi) in synth_bands.items():
-        mask = (wave >= w_lo) & (wave <= w_hi) & np.isfinite(flux) & (flux > 0)
-        if np.sum(mask) >= 1:
-            mean_flux = np.mean(flux[mask])
-            mean_err = np.sqrt(np.mean(error[mask] ** 2)) if np.any(error[mask] > 0) else mean_flux * 0.1
-            center_wave = (w_lo + w_hi) / 2.0
-            # flux_lambda → f_nu (Jy): f_nu = f_lambda * lambda^2 / c * 1e23
-            c_A = 2.99792458e18  # Angstrom/s
-            f_nu_jy = mean_flux * center_wave ** 2 / c_A * 1e23
-            if f_nu_jy > 0:
-                mag = -2.5 * np.log10(f_nu_jy / 3631.0)
-                # 误差传播
-                f_nu_err = mean_err * center_wave ** 2 / c_A * 1e23
-                mag_err = 2.5 / np.log(10) * f_nu_err / f_nu_jy if f_nu_jy > 0 else 0.1
-                if 0 < mag < 30:
-                    phot[band_name] = (mag, mag_err, center_wave)
-
-    return phot
+    return {}
 
 
 def plot_spectrum(spec, save_path=None):
@@ -418,35 +780,57 @@ def plot_spectrum(spec, save_path=None):
         return None
 
     import matplotlib.pyplot as plt
-    fig, ax = plt.subplots(figsize=(12, 5))
+    fig, ax = plt.subplots(figsize=(9.0, 4.0))
 
-    wave = spec['wavelength'] / 10000.0  # Angstrom → um
-    flux = spec.get('flux_mjy_sr', spec['flux'])
-    error = spec.get('error')
+    def _optional_array(value):
+        if value is None:
+            return None
+        arr = np.asarray(value, dtype=float)
+        return arr if arr.ndim > 0 else None
 
-    # 使用 MJy/sr 绘图 (如果有)
-    if 'flux_mjy_sr' in spec:
-        ylabel = 'Flux (MJy/sr)'
-        flux = spec['flux_mjy_sr']
+    if 'lambda_Flambda' in spec:
+        flux = np.asarray(spec['lambda_Flambda'], dtype=float)
+        error = _optional_array(spec.get('lambda_Flambda_err'))
+        ylabel = r'$\lambda F_\lambda$ (erg s$^{-1}$ cm$^{-2}$)'
+    elif 'flux_mjy_sr' in spec:
+        flux = np.asarray(spec['flux_mjy_sr'], dtype=float)
+        error = _optional_array(spec.get('error'))
+        ylabel = 'Flux (MJy sr$^{-1}$; quick-look)'
     else:
-        ylabel = r'$f_\lambda$ (erg s$^{-1}$ cm$^{-2}$ A$^{-1}$)'
+        flux = np.asarray(spec['flux'], dtype=float)
+        error = _optional_array(spec.get('error'))
+        ylabel = r'$F_\lambda$ (erg s$^{-1}$ cm$^{-2}$ A$^{-1}$)'
+
+    wave = np.asarray(spec.get('lambda_um', np.asarray(spec['wavelength']) / 10000.0),
+                      dtype=float)
+    if wave.shape != flux.shape:
+        fallback_wave = np.asarray(spec.get('wavelength', []), dtype=float)
+        if fallback_wave.shape == flux.shape and len(fallback_wave) > 0:
+            wave = fallback_wave / 10000.0
+        else:
+            n = min(len(wave), len(flux))
+            wave = wave[:n]
+            flux = flux[:n]
+            if error is not None:
+                error = error[:n]
 
     valid = np.isfinite(flux) & (flux != 0)
-    ax.plot(wave[valid], flux[valid], 'b.-', lw=1.0, ms=4,
-            alpha=0.8, label='SPHEREx spectrum')
-    if error is not None and np.any(error > 0):
+    ax.plot(wave[valid], flux[valid], color='black', marker='o', lw=0.7,
+            ms=2.5, alpha=0.85, label='SPHEREx spectrophotometry')
+    if error is not None and len(error) == len(flux) and np.any(error > 0):
         err_valid = error[valid] if len(error) == len(flux) else None
         if err_valid is not None:
             ax.fill_between(wave[valid], flux[valid] - err_valid,
                             flux[valid] + err_valid,
-                            color='blue', alpha=0.15)
+                            color='0.55', alpha=0.18, lw=0)
 
-    ax.set_xlabel('Wavelength (um)', fontsize=12)
-    ax.set_ylabel(ylabel, fontsize=12)
-    ax.set_title(f"SPHEREx Spectrum  RA={spec['ra']:.4f} DEC={spec['dec']:.4f}  "
-                 f"({spec.get('n_channels', 0)} channels)", fontsize=13)
-    ax.legend()
-    ax.grid(True, alpha=0.3)
+    ax.set_xlabel(r'Wavelength ($\mu$m)', fontsize=11)
+    ax.set_ylabel(ylabel, fontsize=11)
+    method = spec.get('method', 'spectrophotometry')
+    ax.set_title(f"SPHEREx {method}  RA={spec['ra']:.4f} DEC={spec['dec']:.4f}  "
+                 f"({spec.get('n_channels', 0)} points)", fontsize=11)
+    ax.legend(fontsize=9)
+    ax.grid(True, alpha=0.25)
 
     # 轴范围紧凑到光谱数据 (单位是 um, 直接设置)
     w_valid = wave[valid]
@@ -469,13 +853,52 @@ def save_spectrum_csv(result, output_dir):
     import pandas as pd
     if result is None or 'wavelength' not in result:
         return None
-    data = {'wavelength_A': result['wavelength'], 'flux': result['flux']}
-    if 'error' in result and result['error'] is not None:
-        data['error'] = result['error']
-    if 'flux_mjy_sr' in result:
-        data['flux_mjy_sr'] = result['flux_mjy_sr']
-    df = pd.DataFrame(data)
-    return utils.write_csv(df, output_dir, 'spherex_spectrum.csv')
+    method = result.get('method', '')
+    if 'table' in result:
+        table = result['table'].copy()
+        is_official = bool(result.get('is_official_spectrophotometry', False))
+        full_name = (
+            'spherex_spectrophotometry_full.csv'
+            if is_official else 'spherex_raw_channels_full.csv'
+        )
+        table_path = utils.write_csv(
+            table, output_dir, full_name)
+        core_cols = [
+            'lambda_um', 'wavelength_A', 'lambda_width',
+            'lambda_Flambda', 'lambda_Flambda_err',
+            'flam', 'flux_cgs', 'fluxerr_cgs',
+            'flux_jy', 'flux_err_jy',
+            'flux', 'flux_err', 'flux_uJy', 'flux_err_uJy',
+            'mjd', 'x_image', 'y_image',
+            'det_id', 'lvf_id', 'obs_id', 'obs_publisher_did',
+            'flags', 'fit_ql', 'deep_flg', 'extraction_method',
+        ]
+        cols = [c for c in core_cols if c in table.columns]
+        df = table[cols].copy() if cols else table
+    else:
+        err = result.get('error')
+        if err is None:
+            err = np.full_like(np.asarray(result['wavelength'], dtype=float), np.nan)
+        wave_A = np.asarray(result['wavelength'], dtype=float)
+        flux = np.asarray(result['flux'], dtype=float)
+        df = pd.DataFrame({
+            'lambda_um': result.get('lambda_um', wave_A / 1e4),
+            'wavelength_A': wave_A,
+            'lambda_Flambda': result.get(
+                'lambda_Flambda',
+                wave_A * flux),
+            'lambda_Flambda_err': result.get(
+                'lambda_Flambda_err',
+                wave_A * np.asarray(err)),
+            'flam': flux,
+            'flux_cgs': flux,
+            'fluxerr_cgs': err,
+            'flux_jy': result.get('flux_jy'),
+            'flux_err_jy': result.get('flux_err_jy'),
+        })
+        table_path = None
+    path = utils.write_csv(df, output_dir, 'spherex_spectrum.csv')
+    return {'spectrum_csv': path, 'full_table_csv': table_path, 'method': method}
 
 
 def save_photometry_csv(result, output_dir):
